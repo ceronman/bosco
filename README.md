@@ -1,0 +1,2 @@
+# bosco
+Experimental programming language
