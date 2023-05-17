@@ -1,0 +1,91 @@
+// Line comment
+
+/* Block comment (no nesting) */
+
+
+// Functions
+
+// Long form
+fun add(x int, y int) int {
+	return x + y
+}
+
+// Short form
+fun add(x int, y int) int: x + y // no return needed
+
+fun add(x int, y int): x + y // no return type needed (maybe!)
+
+// Long closure (provisional)
+fn x, y {
+	x + y
+}
+
+// Short closure (provisional)
+fn x, y: x + y
+
+// Variable declaration
+let i = 1
+let i Int = 1
+
+var i = 1
+var i Int = 1
+
+// Control flow
+
+// IF
+
+// Long form
+if a > 0 {
+	run()
+} else {
+	stop()
+}
+
+// Short form
+if a > 0: run() else: stop()
+
+// WHILE
+
+while a > 0 {
+	increment()
+}
+
+while a > 0: increment()
+
+// LOOP (provisional)
+
+loop {
+	run()
+}
+
+loop: run()
+
+// FOR
+
+for i in elements {
+	print(i)
+}
+
+for i in elements: print(i)
+
+// TRY (provisional)
+
+try {
+	do_something()
+} exept IOError(e) {
+	do_other()
+} finally {
+	cleanup()
+}
+
+try {
+	danger()
+} except {
+	IOError(e) {
+		print("io error")
+	} 
+	Error(e): print("other error")
+}
+
+try: foo() except IOError(e): print(e)
+
