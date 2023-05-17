@@ -1,0 +1,4 @@
+var
+//--------------------------------------------------------------------------------
+line 1:0 mismatched input 'var' expecting {'true', 'false', DECIMAL_LITERAL}
+(program:1 (expression:1 (atomExpression:1 var)) <EOF>)

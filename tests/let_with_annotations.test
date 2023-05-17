@@ -1,0 +1,4 @@
+let foo Int
+//--------------------------------------------------------------------------------
+line 1:0 mismatched input 'let' expecting {'true', 'false', DECIMAL_LITERAL}
+(program:1 (expression:1 (atomExpression:1 let foo Int)) <EOF>)
