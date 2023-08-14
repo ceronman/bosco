@@ -1,8 +1,8 @@
 program = { SOI ~ int_literal+ ~ EOI }
 WHITESPACE = _{ " " | "\n" | "\t" | "\r\n" }
 
-int_literal = { dec_literal | hex_literal | oct_literal | bin_literal }
-dec_literal = @{ "0" | '1'..'9' ~ ((ASCII_DIGIT | "_")* ~ ASCII_DIGIT)? }
-hex_literal = @{ "0" ~ ^"x" ~ ASCII_HEX_DIGIT ~ ((ASCII_HEX_DIGIT | "_")* ~ ASCII_HEX_DIGIT)? }
-oct_literal = @{ "0" ~ ^"o" ~ ASCII_OCT_DIGIT ~ ((ASCII_OCT_DIGIT | "_")* ~ ASCII_OCT_DIGIT)? }
-bin_literal = @{ "0" ~ ^"o" ~ ASCII_BIN_DIGIT ~ ((ASCII_BIN_DIGIT | "_")* ~ ASCII_BIN_DIGIT)? }
+int_literal = ${  bin_literal | oct_literal | hex_literal | dec_literal }
+dec_literal = @{ ASCII_DIGIT ~ ("_"? ~ ASCII_DIGIT)* }
+hex_literal = @{ "0" ~ ^"x" ~ ASCII_HEX_DIGIT ~ ("_"? ~ ASCII_HEX_DIGIT)* }
+oct_literal = @{ "0" ~ ^"o" ~ ASCII_OCT_DIGIT ~ ("_"? ~ ASCII_OCT_DIGIT)* }
+bin_literal = @{ "0" ~ ^"b" ~ ASCII_BIN_DIGIT ~ ("_"? ~ ASCII_BIN_DIGIT)* }
