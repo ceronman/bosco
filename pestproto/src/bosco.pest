@@ -1,8 +1,22 @@
-program = { SOI ~ int_literal+ ~ EOI }
 WHITESPACE = _{ " " | "\n" | "\t" | "\r\n" }
+COMMENT = _{ "//" ~ (!"\n" ~ ANY)* ~ "\n"  }
+
+program = { SOI ~ expression+ ~ EOI }
+
+expression = { identifier | literal }
+
+literal = { int_literal | string_literal | bool_literal }
 
 int_literal = ${  bin_literal | oct_literal | hex_literal | dec_literal }
 dec_literal = @{ ASCII_DIGIT ~ ("_"? ~ ASCII_DIGIT)* }
 hex_literal = @{ "0" ~ ^"x" ~ ASCII_HEX_DIGIT ~ ("_"? ~ ASCII_HEX_DIGIT)* }
 oct_literal = @{ "0" ~ ^"o" ~ ASCII_OCT_DIGIT ~ ("_"? ~ ASCII_OCT_DIGIT)* }
 bin_literal = @{ "0" ~ ^"b" ~ ASCII_BIN_DIGIT ~ ("_"? ~ ASCII_BIN_DIGIT)* }
+
+string_literal = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
+
+bool_literal = ${ "true" | "false" }
+
+identifier = ${ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+
+binary_op = ${ ">=" | "<=" | ">" | "<" | "+" | "-" | "*" | "/" }
