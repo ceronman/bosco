@@ -1,6 +1,5 @@
-use std::iter::Peekable;
 use std::ops::Range;
-use std::str::Chars;
+use std::str::CharIndices;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum TokenKind {
@@ -15,6 +14,7 @@ pub enum TokenKind {
     Number,
     Identifier,
 
+    WS,
     Error,
     Eof,
 }
@@ -26,62 +26,68 @@ pub struct Token {
 
 pub struct Lexer<'source> {
     source: &'source str,
-    chars: Peekable<Chars<'source>>,
-    current: Option<char>,
-    lexeme_end: usize,
+    iterator: CharIndices<'source>,
+    current: Option<(usize, char)>,
     lexeme_start: usize,
 }
 
 impl<'source> Lexer<'source> {
     pub fn new(source: &'source str) -> Self {
-        let mut chars = source.chars().peekable();
-        let current = chars.next();
+        let mut iterator = source.char_indices();
+        let current = iterator.next();
         Self {
             source,
-            chars,
+            iterator,
             current,
             lexeme_start: 0,
-            lexeme_end: 0,
         }
     }
 
     pub fn next(&mut self) -> Token {
-        self.skip_whitespace();
-        match self.advance() {
-            Some(char) => match char {
-                '+' => self.make_token(TokenKind::Plus),
-                '-' => self.make_token(TokenKind::Minus),
-                '*' => self.make_token(TokenKind::Star),
-                '/' => self.make_token(TokenKind::Slash),
-                _ => self.make_token(TokenKind::Error),
-            },
-            None => Token {
-                kind: TokenKind::Eof,
-                range: self.lexeme_start..self.lexeme_end,
-            },
+        let char = match self.advance() {
+            Some(c) => c,
+            None => return self.make_token(TokenKind::Eof),
+        };
+        match char {
+            ' ' | '\t' => self.whitespace(),
+            '+' => self.make_token(TokenKind::Plus),
+            '-' => self.make_token(TokenKind::Minus),
+            '*' => self.make_token(TokenKind::Star),
+            '/' => self.make_token(TokenKind::Slash),
+            '0'..='9' => self.number(),
+            _ => self.make_token(TokenKind::Error),
         }
     }
 
-    fn skip_whitespace(&mut self) {
-        while let Some(c) = self.current {
-            match c {
-                ' ' | '\t' => self.advance(),
-                _ => break,
-            };
+    fn whitespace(&mut self) -> Token {
+        while let Some(' ' | '\t') = self.peek() {
+            self.advance();
         }
+        self.make_token(TokenKind::WS)
+    }
+
+    fn number(&mut self) -> Token {
+        while let Some('0'..='9') = self.peek() {
+            self.advance();
+        }
+        self.make_token(TokenKind::Number)
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.current.map(|(_, c)| c)
     }
 
     fn advance(&mut self) -> Option<char> {
-        self.lexeme_end += 1;
-        let current = self.current;
-        self.current = self.chars.next();
-        current
+        let result = self.peek();
+        self.current = self.iterator.next();
+        result
     }
 
     fn make_token(&self, kind: TokenKind) -> Token {
+        let lexeme_end = self.current.map(|(i, _)| i).unwrap_or(self.source.len());
         Token {
             kind,
-            range: self.lexeme_start..self.lexeme_end,
+            range: self.lexeme_start..lexeme_end,
         }
     }
 }
@@ -89,6 +95,7 @@ impl<'source> Lexer<'source> {
 #[cfg(test)]
 mod tests {
     use crate::lexer::{Lexer, TokenKind};
+    use TokenKind::*;
 
     fn lex(code: &str) -> Vec<TokenKind> {
         let mut lexer = Lexer::new(code);
@@ -101,7 +108,12 @@ mod tests {
         result
     }
     #[test]
-    fn it_works() {
-        assert_eq!(lex("+ -"), vec![TokenKind::Plus, TokenKind::Minus]);
+    fn operators() {
+        assert_eq!(lex(" + - "), vec![WS, Plus, WS, Minus, WS]);
+    }
+
+    #[test]
+    fn numbers() {
+        assert_eq!(lex("123 0 04567"), vec![Number, WS, Number, WS, Number]);
     }
 }
