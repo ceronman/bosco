@@ -19,9 +19,11 @@ pub enum TokenKind {
     Eof,
 }
 
+#[derive(Copy, Clone, Debug)]
 pub struct Token {
     kind: TokenKind,
-    range: Range<usize>,
+    start: usize,
+    end: usize,
 }
 
 pub struct Lexer<'source> {
@@ -44,6 +46,7 @@ impl<'source> Lexer<'source> {
     }
 
     pub fn next(&mut self) -> Token {
+        self.lexeme_start = self.position();
         let char = match self.advance() {
             Some(c) => c,
             None => return self.make_token(TokenKind::Eof),
@@ -77,6 +80,10 @@ impl<'source> Lexer<'source> {
         self.current.map(|(_, c)| c)
     }
 
+    fn position(&self) -> usize {
+        self.current.map(|(i, _)| i).unwrap_or(self.source.len())
+    }
+
     fn advance(&mut self) -> Option<char> {
         let result = self.peek();
         self.current = self.iterator.next();
@@ -84,36 +91,47 @@ impl<'source> Lexer<'source> {
     }
 
     fn make_token(&self, kind: TokenKind) -> Token {
-        let lexeme_end = self.current.map(|(i, _)| i).unwrap_or(self.source.len());
         Token {
             kind,
-            range: self.lexeme_start..lexeme_end,
+            start: self.lexeme_start,
+            end: self.position(),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::lexer::{Lexer, TokenKind};
+    use std::iter::from_fn;
+    use crate::lexer::{Lexer, Token, TokenKind};
     use TokenKind::*;
 
-    fn lex(code: &str) -> Vec<TokenKind> {
+    fn test_lexer(code: &str, expected: Vec<TokenKind>, skip_ws: bool) {
         let mut lexer = Lexer::new(code);
-        let mut token = lexer.next();
-        let mut result: Vec<TokenKind> = Vec::new();
-        while token.kind != TokenKind::Eof {
-            result.push(token.kind);
-            token = lexer.next();
-        }
-        result
+        let tokens: Vec<Token> = from_fn(move || {
+            let token = lexer.next();
+            if token.kind == Eof { None } else { Some(token) }
+        }).collect();
+
+        let kinds: Vec<TokenKind> = tokens.clone().into_iter()
+            .map(|token| token.kind)
+            .filter(|&kind| !skip_ws || kind != WS)
+            .collect();
+
+        assert_eq!(kinds, expected);
+
+        let text = tokens.into_iter()
+            .map(|token| &code[token.start..token.end])
+            .fold(String::new(), |a, b| a + b);
+
+        assert_eq!(text.as_str(), code);
     }
     #[test]
     fn operators() {
-        assert_eq!(lex(" + - "), vec![WS, Plus, WS, Minus, WS]);
+        test_lexer("+ -", vec![Plus, Minus], true);
     }
 
     #[test]
     fn numbers() {
-        assert_eq!(lex("123 0 04567"), vec![Number, WS, Number, WS, Number]);
+        test_lexer("123 0 04567 00123", vec![Number, Number, Number, Number], true);
     }
 }
