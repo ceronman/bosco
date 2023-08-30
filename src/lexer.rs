@@ -1,4 +1,3 @@
-use std::ops::Range;
 use std::str::CharIndices;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -14,7 +13,7 @@ pub enum TokenKind {
     Number,
     Identifier,
 
-    WS,
+    Whitespace,
     Error,
     Eof,
 }
@@ -58,6 +57,7 @@ impl<'source> Lexer<'source> {
             '*' => self.make_token(TokenKind::Star),
             '/' => self.make_token(TokenKind::Slash),
             '0'..='9' => self.number(),
+            c if c == '_' || c.is_alphabetic() => self.identifier(),
             _ => self.make_token(TokenKind::Error),
         }
     }
@@ -66,7 +66,7 @@ impl<'source> Lexer<'source> {
         while let Some(' ' | '\t') = self.peek() {
             self.advance();
         }
-        self.make_token(TokenKind::WS)
+        self.make_token(TokenKind::Whitespace)
     }
 
     fn number(&mut self) -> Token {
@@ -74,6 +74,23 @@ impl<'source> Lexer<'source> {
             self.advance();
         }
         self.make_token(TokenKind::Number)
+    }
+
+    fn identifier(&mut self) -> Token {
+        while let Some(c) = self.peek() {
+            if c.is_alphanumeric() || c == '_' {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        let lexeme = &self.source[self.lexeme_start..self.position()];
+        let kind = match lexeme {
+            "true" => TokenKind::True,
+            "false" => TokenKind::False,
+            _ => TokenKind::Identifier,
+        };
+        self.make_token(kind)
     }
 
     fn peek(&self) -> Option<char> {
@@ -101,25 +118,33 @@ impl<'source> Lexer<'source> {
 
 #[cfg(test)]
 mod tests {
-    use std::iter::from_fn;
     use crate::lexer::{Lexer, Token, TokenKind};
+    use std::iter::from_fn;
     use TokenKind::*;
 
     fn test_lexer(code: &str, expected: Vec<TokenKind>, skip_ws: bool) {
         let mut lexer = Lexer::new(code);
         let tokens: Vec<Token> = from_fn(move || {
             let token = lexer.next();
-            if token.kind == Eof { None } else { Some(token) }
-        }).collect();
+            if token.kind == Eof {
+                None
+            } else {
+                Some(token)
+            }
+        })
+        .collect();
 
-        let kinds: Vec<TokenKind> = tokens.clone().into_iter()
+        let kinds: Vec<TokenKind> = tokens
+            .clone()
+            .into_iter()
             .map(|token| token.kind)
-            .filter(|&kind| !skip_ws || kind != WS)
+            .filter(|&kind| !skip_ws || kind != Whitespace)
             .collect();
 
         assert_eq!(kinds, expected);
 
-        let text = tokens.into_iter()
+        let text = tokens
+            .into_iter()
             .map(|token| &code[token.start..token.end])
             .fold(String::new(), |a, b| a + b);
 
@@ -132,6 +157,28 @@ mod tests {
 
     #[test]
     fn numbers() {
-        test_lexer("123 0 00123 123_345", vec![Number, Number, Number, Number], true);
+        test_lexer(
+            "123 0 00123 123_345",
+            vec![Number, Number, Number, Number],
+            true,
+        );
+    }
+
+    #[test]
+    fn identifiers() {
+        test_lexer(
+            "one one2 _ _one __one__",
+            vec![Identifier, Identifier, Identifier, Identifier, Identifier],
+            true,
+        );
+    }
+
+    #[test]
+    fn keywords() {
+        test_lexer(
+            "true false _true False",
+            vec![True, False, Identifier, Identifier],
+            true,
+        );
     }
 }
