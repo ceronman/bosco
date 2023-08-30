@@ -70,7 +70,7 @@ impl<'source> Lexer<'source> {
     }
 
     fn number(&mut self) -> Token {
-        while let Some('0'..='9') = self.peek() {
+        while let Some('0'..='9' | '_') = self.peek() {
             self.advance();
         }
         self.make_token(TokenKind::Number)
@@ -132,6 +132,6 @@ mod tests {
 
     #[test]
     fn numbers() {
-        test_lexer("123 0 04567 00123", vec![Number, Number, Number, Number], true);
+        test_lexer("123 0 00123 123_345", vec![Number, Number, Number, Number], true);
     }
 }
