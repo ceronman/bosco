@@ -23,9 +23,11 @@ pub enum TokenKind {
     Number,
     Identifier,
 
+    LineComment,
     Whitespace,
-    Error,
+    Eol,
     Eof,
+    Error,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -69,11 +71,18 @@ impl<'source> Lexer<'source> {
         };
 
         let kind = match char {
-            ' ' | '\t' => self.whitespace(),
+            ' ' | '\t' | '\r' => self.whitespace(),
+            '\n' => TokenKind::Eol,
             '+' => TokenKind::Plus,
             '-' => TokenKind::Minus,
             '*' => TokenKind::Star,
-            '/' => TokenKind::Slash,
+            '/' => {
+                if let Some('/') = self.peek() {
+                    self.line_comment()
+                } else {
+                    TokenKind::Slash
+                }
+            }
             '(' => TokenKind::LParen,
             ')' => TokenKind::RParen,
             '{' => TokenKind::LBrace,
@@ -93,10 +102,22 @@ impl<'source> Lexer<'source> {
     }
 
     fn whitespace(&mut self) -> TokenKind {
-        while let Some(' ' | '\t') = self.peek() {
+        while let Some(' ' | '\t' | '\r') = self.peek() {
             self.advance();
         }
         TokenKind::Whitespace
+    }
+
+    fn line_comment(&mut self) -> TokenKind {
+        self.advance(); // consume the second '/'
+        while let Some(c) = self.peek() {
+            if c != '\n' {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        TokenKind::LineComment
     }
 
     fn number(&mut self) -> TokenKind {

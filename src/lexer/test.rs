@@ -70,3 +70,28 @@ fn braces() {
         true,
     );
 }
+
+#[test]
+fn lines() {
+    test_lexer(
+        "one\ntwo\nthree",
+        vec![Identifier, Eol, Identifier, Eol, Identifier],
+        true,
+    );
+}
+#[test]
+fn line_comment() {
+    test_lexer(
+        "one // this is a comment\n two",
+        vec![Identifier, LineComment, Eol, Identifier],
+        true,
+    );
+}
+#[test]
+fn ending_line_comment() {
+    test_lexer(
+        "one // this is a comment",
+        vec![Identifier, LineComment],
+        true,
+    );
+}
