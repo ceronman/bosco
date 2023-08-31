@@ -55,6 +55,45 @@ impl<'source> Lexer<'source> {
         }
     }
 
+    fn next_token(&mut self) -> Option<Token> {
+        self.lexeme_start = self.offset();
+
+        let char = match self.advance() {
+            Some(c) => c,
+            None => return None,
+        };
+
+        let kind = match char {
+            ' ' | '\t' | '\r' => self.whitespace(),
+            '\n' => TokenKind::Eol,
+            '+' => TokenKind::Plus,
+            '-' => TokenKind::Minus,
+            '*' => TokenKind::Star,
+            '/' => match self.peek() {
+                Some('/') => self.line_comment(),
+                Some('*') => self.block_comment(),
+                _ => TokenKind::Slash,
+            },
+            '(' => TokenKind::LParen,
+            ')' => TokenKind::RParen,
+            '{' => TokenKind::LBrace,
+            '}' => TokenKind::RBrace,
+            '[' => TokenKind::LBracket,
+            ']' => TokenKind::RBracket,
+            '0'..='9' => self.number(),
+            c if c == '_' || c.is_alphabetic() => self.identifier(),
+            _ => TokenKind::Error,
+        };
+
+        let token = Token {
+            kind,
+            start: self.lexeme_start,
+            end: self.offset(),
+        };
+
+        Some(token)
+    }
+
     fn whitespace(&mut self) -> TokenKind {
         while let Some(' ' | '\t' | '\r') = self.peek() {
             self.iterator.next();
@@ -111,7 +150,7 @@ impl<'source> Lexer<'source> {
                 break;
             }
         }
-        let lexeme = &self.source[self.lexeme_start..self.next_position()];
+        let lexeme = &self.source[self.lexeme_start..self.offset()];
         match lexeme {
             "true" => TokenKind::True,
             "false" => TokenKind::False,
@@ -127,7 +166,7 @@ impl<'source> Lexer<'source> {
         self.iterator.clone().next().map(|(_, c)| c)
     }
 
-    fn next_position(&self) -> usize {
+    fn offset(&self) -> usize {
         self.iterator
             .clone()
             .next()
@@ -139,42 +178,7 @@ impl<'source> Lexer<'source> {
 impl<'source> Iterator for Lexer<'source> {
     type Item = Token;
 
-    fn next(&mut self) -> Option<Token> {
-        self.lexeme_start = self.next_position();
-
-        let char = match self.advance() {
-            Some(c) => c,
-            None => return None,
-        };
-
-        let kind = match char {
-            ' ' | '\t' | '\r' => self.whitespace(),
-            '\n' => TokenKind::Eol,
-            '+' => TokenKind::Plus,
-            '-' => TokenKind::Minus,
-            '*' => TokenKind::Star,
-            '/' => match self.peek() {
-                Some('/') => self.line_comment(),
-                Some('*') => self.block_comment(),
-                _ => TokenKind::Slash,
-            },
-            '(' => TokenKind::LParen,
-            ')' => TokenKind::RParen,
-            '{' => TokenKind::LBrace,
-            '}' => TokenKind::RBrace,
-            '[' => TokenKind::LBracket,
-            ']' => TokenKind::RBracket,
-            '0'..='9' => self.number(),
-            c if c == '_' || c.is_alphabetic() => self.identifier(),
-            _ => TokenKind::Error,
-        };
-
-        let token = Token {
-            kind,
-            start: self.lexeme_start,
-            end: self.next_position(),
-        };
-
-        Some(token)
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_token()
     }
 }
