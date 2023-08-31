@@ -27,7 +27,6 @@ pub enum TokenKind {
     BlockComment,
     Whitespace,
     Eol,
-    Eof,
 
     UnterminatedCommentError,
     Error,
@@ -35,105 +34,57 @@ pub enum TokenKind {
 
 #[derive(Copy, Clone, Debug)]
 pub struct Token {
-    kind: TokenKind,
-    start: usize,
-    end: usize,
+    pub kind: TokenKind,
+    pub start: usize,
+    pub end: usize,
 }
 
+#[derive(Clone, Debug)]
 pub struct Lexer<'source> {
     source: &'source str,
     iterator: CharIndices<'source>,
-    current: Option<(usize, char)>,
     lexeme_start: usize,
 }
 
 impl<'source> Lexer<'source> {
     pub fn new(source: &'source str) -> Self {
-        let mut iterator = source.char_indices();
-        let current = iterator.next();
         Self {
             source,
-            iterator,
-            current,
+            iterator: source.char_indices(),
             lexeme_start: 0,
-        }
-    }
-
-    pub fn next(&mut self) -> Token {
-        self.lexeme_start = self.position();
-        let char = match self.advance() {
-            Some(c) => c,
-            None => {
-                let kind = TokenKind::Eof;
-                return Token {
-                    kind,
-                    start: self.lexeme_start,
-                    end: self.position(),
-                };
-            }
-        };
-
-        let kind = match char {
-            ' ' | '\t' | '\r' => self.whitespace(),
-            '\n' => TokenKind::Eol,
-            '+' => TokenKind::Plus,
-            '-' => TokenKind::Minus,
-            '*' => TokenKind::Star,
-            '/' => match self.peek() {
-                Some('/') => self.line_comment(),
-                Some('*') => self.block_comment(),
-                _ => TokenKind::Slash,
-            },
-            '(' => TokenKind::LParen,
-            ')' => TokenKind::RParen,
-            '{' => TokenKind::LBrace,
-            '}' => TokenKind::RBrace,
-            '[' => TokenKind::LBracket,
-            ']' => TokenKind::RBracket,
-            '0'..='9' => self.number(),
-            c if c == '_' || c.is_alphabetic() => self.identifier(),
-            _ => TokenKind::Error,
-        };
-
-        Token {
-            kind,
-            start: self.lexeme_start,
-            end: self.position(),
         }
     }
 
     fn whitespace(&mut self) -> TokenKind {
         while let Some(' ' | '\t' | '\r') = self.peek() {
-            self.advance();
+            self.iterator.next();
         }
         TokenKind::Whitespace
     }
 
     fn line_comment(&mut self) -> TokenKind {
-        self.advance(); // consume the second '/'
+        self.advance(); // Consume second '/'
         while let Some(c) = self.peek() {
-            if c != '\n' {
-                self.advance();
-            } else {
+            if c == '\n' {
                 break;
             }
+            self.advance();
         }
         TokenKind::LineComment
     }
 
     fn block_comment(&mut self) -> TokenKind {
-        self.advance(); // consume '*'
+        self.advance(); // Consume '*'
         let mut level = 1;
-        while let Some(c) = self.peek() {
-            if c == '*' && matches!(self.peek_next(), Some('/')) {
+        while let Some(c) = self.advance() {
+            if c == '*' && matches!(self.peek(), Some('/')) {
                 self.advance();
                 level -= 1;
             }
-            if c == '/' && matches!(self.peek_next(), Some('*')) {
+            if c == '/' && matches!(self.peek(), Some('*')) {
                 self.advance();
                 level += 1;
             }
-            self.advance();
             if level == 0 {
                 break;
             }
@@ -160,7 +111,7 @@ impl<'source> Lexer<'source> {
                 break;
             }
         }
-        let lexeme = &self.source[self.lexeme_start..self.position()];
+        let lexeme = &self.source[self.lexeme_start..self.next_position()];
         match lexeme {
             "true" => TokenKind::True,
             "false" => TokenKind::False,
@@ -168,21 +119,62 @@ impl<'source> Lexer<'source> {
         }
     }
 
-    fn peek(&self) -> Option<char> {
-        self.current.map(|(_, c)| c)
+    fn advance(&mut self) -> Option<char> {
+        self.iterator.next().map(|(_, c)| c)
     }
 
-    fn peek_next(&self) -> Option<char> {
+    fn peek(&self) -> Option<char> {
         self.iterator.clone().next().map(|(_, c)| c)
     }
 
-    fn position(&self) -> usize {
-        self.current.map(|(i, _)| i).unwrap_or(self.source.len())
+    fn next_position(&self) -> usize {
+        self.iterator
+            .clone()
+            .next()
+            .map(|(i, _)| i)
+            .unwrap_or(self.source.len())
     }
+}
 
-    fn advance(&mut self) -> Option<char> {
-        let result = self.peek();
-        self.current = self.iterator.next();
-        result
+impl<'source> Iterator for Lexer<'source> {
+    type Item = Token;
+
+    fn next(&mut self) -> Option<Token> {
+        self.lexeme_start = self.next_position();
+
+        let char = match self.advance() {
+            Some(c) => c,
+            None => return None,
+        };
+
+        let kind = match char {
+            ' ' | '\t' | '\r' => self.whitespace(),
+            '\n' => TokenKind::Eol,
+            '+' => TokenKind::Plus,
+            '-' => TokenKind::Minus,
+            '*' => TokenKind::Star,
+            '/' => match self.peek() {
+                Some('/') => self.line_comment(),
+                Some('*') => self.block_comment(),
+                _ => TokenKind::Slash,
+            },
+            '(' => TokenKind::LParen,
+            ')' => TokenKind::RParen,
+            '{' => TokenKind::LBrace,
+            '}' => TokenKind::RBrace,
+            '[' => TokenKind::LBracket,
+            ']' => TokenKind::RBracket,
+            '0'..='9' => self.number(),
+            c if c == '_' || c.is_alphabetic() => self.identifier(),
+            _ => TokenKind::Error,
+        };
+
+        let token = Token {
+            kind,
+            start: self.lexeme_start,
+            end: self.next_position(),
+        };
+
+        Some(token)
     }
 }

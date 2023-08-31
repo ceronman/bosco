@@ -1,18 +1,9 @@
 use super::{Lexer, Token, TokenKind};
-use std::iter::from_fn;
 use TokenKind::*;
 
 fn test_lexer(code: &str, expected: Vec<TokenKind>, skip_ws: bool) {
     let mut lexer = Lexer::new(code);
-    let tokens: Vec<Token> = from_fn(move || {
-        let token = lexer.next();
-        if token.kind == Eof {
-            None
-        } else {
-            Some(token)
-        }
-    })
-    .collect();
+    let tokens: Vec<Token> = lexer.collect();
 
     let kinds: Vec<TokenKind> = tokens
         .clone()
@@ -112,6 +103,11 @@ fn block_comment_nested() {
         vec![Identifier, BlockComment, Identifier],
         true,
     );
+}
+
+#[test]
+fn block_comment_minimal() {
+    test_lexer("/**/", vec![BlockComment], true);
 }
 
 #[test]
