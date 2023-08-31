@@ -24,9 +24,12 @@ pub enum TokenKind {
     Identifier,
 
     LineComment,
+    BlockComment,
     Whitespace,
     Eol,
     Eof,
+
+    UnterminatedCommentError,
     Error,
 }
 
@@ -76,13 +79,11 @@ impl<'source> Lexer<'source> {
             '+' => TokenKind::Plus,
             '-' => TokenKind::Minus,
             '*' => TokenKind::Star,
-            '/' => {
-                if let Some('/') = self.peek() {
-                    self.line_comment()
-                } else {
-                    TokenKind::Slash
-                }
-            }
+            '/' => match self.peek() {
+                Some('/') => self.line_comment(),
+                Some('*') => self.block_comment(),
+                _ => TokenKind::Slash,
+            },
             '(' => TokenKind::LParen,
             ')' => TokenKind::RParen,
             '{' => TokenKind::LBrace,
@@ -120,6 +121,30 @@ impl<'source> Lexer<'source> {
         TokenKind::LineComment
     }
 
+    fn block_comment(&mut self) -> TokenKind {
+        self.advance(); // consume '*'
+        let mut level = 1;
+        while let Some(c) = self.peek() {
+            if c == '*' && matches!(self.peek_next(), Some('/')) {
+                self.advance();
+                level -= 1;
+            }
+            if c == '/' && matches!(self.peek_next(), Some('*')) {
+                self.advance();
+                level += 1;
+            }
+            self.advance();
+            if level == 0 {
+                break;
+            }
+        }
+        if level == 0 {
+            TokenKind::BlockComment
+        } else {
+            TokenKind::UnterminatedCommentError
+        }
+    }
+
     fn number(&mut self) -> TokenKind {
         while let Some('0'..='9' | '_') = self.peek() {
             self.advance();
@@ -145,6 +170,10 @@ impl<'source> Lexer<'source> {
 
     fn peek(&self) -> Option<char> {
         self.current.map(|(_, c)| c)
+    }
+
+    fn peek_next(&self) -> Option<char> {
+        self.iterator.clone().next().map(|(_, c)| c)
     }
 
     fn position(&self) -> usize {

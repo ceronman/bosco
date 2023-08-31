@@ -95,3 +95,30 @@ fn ending_line_comment() {
         true,
     );
 }
+
+#[test]
+fn block_comment() {
+    test_lexer(
+        "one /* comment */ other",
+        vec![Identifier, BlockComment, Identifier],
+        true,
+    );
+}
+
+#[test]
+fn block_comment_nested() {
+    test_lexer(
+        "one /* comment /* inner */ part */ other",
+        vec![Identifier, BlockComment, Identifier],
+        true,
+    );
+}
+
+#[test]
+fn block_comment_unterminated() {
+    test_lexer(
+        "one /* comment never terminated",
+        vec![Identifier, UnterminatedCommentError],
+        true,
+    );
+}
