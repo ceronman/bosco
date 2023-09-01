@@ -22,6 +22,7 @@ pub enum TokenKind {
 
     Number,
     Identifier,
+    Str,
 
     LineComment,
     BlockComment,
@@ -58,12 +59,17 @@ impl<'source> Lexer<'source> {
     fn next_token(&mut self) -> Option<Token> {
         self.lexeme_start = self.offset();
 
-        let char = match self.advance() {
-            Some(c) => c,
-            None => return None,
-        };
+        self.advance().map(|c| {
+            Token {
+                kind: self.token_kind(c),
+                start: self.lexeme_start,
+                end: self.offset(),
+            }
+        })
+    }
 
-        let kind = match char {
+    fn token_kind(&mut self, c: char) -> TokenKind {
+        match c {
             ' ' | '\t' | '\r' => self.whitespace(),
             '\n' => TokenKind::Eol,
             '+' => TokenKind::Plus,
@@ -81,17 +87,10 @@ impl<'source> Lexer<'source> {
             '[' => TokenKind::LBracket,
             ']' => TokenKind::RBracket,
             '0'..='9' => self.number(),
+            '"' => self.string(),
             c if c == '_' || c.is_alphabetic() => self.identifier(),
             _ => TokenKind::Error,
-        };
-
-        let token = Token {
-            kind,
-            start: self.lexeme_start,
-            end: self.offset(),
-        };
-
-        Some(token)
+        }
     }
 
     fn whitespace(&mut self) -> TokenKind {
@@ -140,6 +139,15 @@ impl<'source> Lexer<'source> {
             self.advance();
         }
         TokenKind::Number
+    }
+
+    fn string(&mut self) -> TokenKind {
+        while let Some(c) = self.advance() {
+            if c == '"' {
+                break
+            }
+        }
+        TokenKind::Str
     }
 
     fn identifier(&mut self) -> TokenKind {

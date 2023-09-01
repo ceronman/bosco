@@ -117,3 +117,22 @@ fn block_comment_unterminated() {
         true,
     );
 }
+
+#[test]
+fn strings() {
+    test_lexer(
+        r#" ("foo" ident "bar")  "#,
+        vec![LParen, Str, Identifier, Str, RParen],
+        true,
+    );
+}
+
+#[test]
+fn strings_together() {
+    test_lexer(
+        r#" "foo""bar"  "#,
+        vec![Whitespace, Str, Str, Whitespace],
+        false,
+    );
+}
+
