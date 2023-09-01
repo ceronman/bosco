@@ -59,12 +59,10 @@ impl<'source> Lexer<'source> {
     fn next_token(&mut self) -> Option<Token> {
         self.lexeme_start = self.offset();
 
-        self.advance().map(|c| {
-            Token {
-                kind: self.token_kind(c),
-                start: self.lexeme_start,
-                end: self.offset(),
-            }
+        self.advance().map(|c| Token {
+            kind: self.token_kind(c),
+            start: self.lexeme_start,
+            end: self.offset(),
         })
     }
 
@@ -144,7 +142,7 @@ impl<'source> Lexer<'source> {
     fn string(&mut self) -> TokenKind {
         while let Some(c) = self.advance() {
             if c == '"' {
-                break
+                break;
             }
         }
         TokenKind::Str

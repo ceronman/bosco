@@ -135,4 +135,3 @@ fn strings_together() {
         false,
     );
 }
-
