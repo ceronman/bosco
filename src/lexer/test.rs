@@ -2,7 +2,7 @@ use super::{Lexer, Token, TokenKind};
 use TokenKind::*;
 
 fn test_lexer(code: &str, expected: Vec<TokenKind>, skip_ws: bool) {
-    let tokens: Vec<Token> = Lexer::new(code).collect();
+    let tokens: Vec<Token> = Lexer::new(code.chars()).collect();
 
     let kinds: Vec<TokenKind> = tokens
         .clone()

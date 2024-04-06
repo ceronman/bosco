@@ -1,4 +1,4 @@
-use std::str::CharIndices;
+use std::str::{Chars};
 
 #[cfg(test)]
 mod test;
@@ -40,29 +40,32 @@ pub struct Token {
     pub end: usize,
 }
 
-#[derive(Clone, Debug)]
-pub struct Lexer<'source> {
-    source: &'source str,
-    iterator: CharIndices<'source>,
-    lexeme_start: usize,
+#[derive(Debug)]
+pub struct Lexer<'src> {
+    chars: Chars<'src>,
+    start: usize,
+    offset: usize,
+    lexeme: String
 }
 
-impl<'source> Lexer<'source> {
-    pub fn new(source: &'source str) -> Self {
+impl<'src> Lexer<'src> {
+    pub fn new(chars: Chars<'src>) -> Self {
         Self {
-            source,
-            iterator: source.char_indices(),
-            lexeme_start: 0,
+            chars,
+            start: 0,
+            offset: 0,
+            lexeme: String::with_capacity(32)
         }
     }
 
-    fn next_token(&mut self) -> Option<Token> {
-        self.lexeme_start = self.offset();
+    fn token(&mut self) -> Option<Token> {
+        self.lexeme.clear();
+        self.start = self.offset;
 
-        self.advance().map(|c| Token {
+        self.eat().map(|c| Token {
             kind: self.token_kind(c),
-            start: self.lexeme_start,
-            end: self.offset(),
+            start: self.start,
+            end: self.offset,
         })
     }
 
@@ -93,32 +96,32 @@ impl<'source> Lexer<'source> {
 
     fn whitespace(&mut self) -> TokenKind {
         while let Some(' ' | '\t' | '\r') = self.peek() {
-            self.iterator.next();
+            self.eat();
         }
         TokenKind::Whitespace
     }
 
     fn line_comment(&mut self) -> TokenKind {
-        self.advance(); // Consume second '/'
+        self.eat(); // Consume second '/'
         while let Some(c) = self.peek() {
             if c == '\n' {
                 break;
             }
-            self.advance();
+            self.eat();
         }
         TokenKind::LineComment
     }
 
     fn block_comment(&mut self) -> TokenKind {
-        self.advance(); // Consume '*'
+        self.eat(); // Consume '*'
         let mut level = 1;
-        while let Some(c) = self.advance() {
+        while let Some(c) = self.eat() {
             if c == '*' && matches!(self.peek(), Some('/')) {
-                self.advance();
+                self.eat();
                 level -= 1;
             }
             if c == '/' && matches!(self.peek(), Some('*')) {
-                self.advance();
+                self.eat();
                 level += 1;
             }
             if level == 0 {
@@ -134,13 +137,13 @@ impl<'source> Lexer<'source> {
 
     fn number(&mut self) -> TokenKind {
         while let Some('0'..='9' | '_') = self.peek() {
-            self.advance();
+            self.eat();
         }
         TokenKind::Number
     }
 
     fn string(&mut self) -> TokenKind {
-        while let Some(c) = self.advance() {
+        while let Some(c) = self.eat() {
             if c == '"' {
                 break;
             }
@@ -151,33 +154,30 @@ impl<'source> Lexer<'source> {
     fn identifier(&mut self) -> TokenKind {
         while let Some(c) = self.peek() {
             if c.is_alphanumeric() || c == '_' {
-                self.advance();
+                self.eat();
             } else {
                 break;
             }
         }
-        let lexeme = &self.source[self.lexeme_start..self.offset()];
-        match lexeme {
+        match self.lexeme.as_str() {
             "true" => TokenKind::True,
             "false" => TokenKind::False,
             _ => TokenKind::Identifier,
         }
     }
 
-    fn advance(&mut self) -> Option<char> {
-        self.iterator.next().map(|(_, c)| c)
+    fn eat(&mut self) -> Option<char> {
+        if let Some(c) = self.chars.next() {
+            self.lexeme.push(c);
+            self.offset += c.len_utf8();
+            Some(c)
+        } else {
+            None
+        }
     }
 
     fn peek(&self) -> Option<char> {
-        self.iterator.clone().next().map(|(_, c)| c)
-    }
-
-    fn offset(&self) -> usize {
-        self.iterator
-            .clone()
-            .next()
-            .map(|(i, _)| i)
-            .unwrap_or(self.source.len())
+        self.chars.clone().next()
     }
 }
 
@@ -185,6 +185,6 @@ impl<'source> Iterator for Lexer<'source> {
     type Item = Token;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_token()
+        self.token()
     }
 }
