@@ -1,13 +1,11 @@
-use crate::lexer::{Lexer, Token};
+use crate::parser::Parser;
 
 mod lexer;
 mod parser;
 
 fn main() {
-    let code = "hello 1 [ ]";
-    let tokens: Vec<Token> = Lexer::new(code.chars()).collect();
-    for Token { kind, start, end } in tokens {
-        let lexeme = &code[start..end];
-        println!("[{kind:?}] \"{lexeme}\"")
-    }
+    let code = "\"hello world\"\"world\"";
+    let mut parser = Parser::new(code);
+    let program = parser.parse();
+    println!("{:#?}", program);
 }

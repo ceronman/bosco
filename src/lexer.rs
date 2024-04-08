@@ -40,7 +40,8 @@ pub struct Token {
     pub end: usize,
 }
 
-#[derive(Debug)]
+// TODO: Clone is expensive here because of the String
+#[derive(Debug, Clone)]
 pub struct Lexer<'src> {
     chars: Chars<'src>,
     start: usize,
