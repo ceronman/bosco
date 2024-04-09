@@ -6,6 +6,6 @@ mod parser;
 fn main() {
     let code = "\"hello world\"\"world\"";
     let mut parser = Parser::new(code);
-    let program = parser.parse();
+    let program = parser.parse().unwrap();
     println!("{:#?}", program);
 }

@@ -1,7 +1,7 @@
 use crate::lexer::{Lexer, Token, TokenKind};
 
 #[derive(Debug)]
-pub struct Program {
+pub struct Module {
     pub expressions: Vec<Expression>
 }
 
@@ -17,6 +17,7 @@ pub struct Call {
     pub args: Vec<Expression>
 }
 
+type Result<T> = std::result::Result<T, &'static str>;
 
 pub struct Parser<'src> {
     lexer: Lexer<'src>,
@@ -29,25 +30,33 @@ impl<'src> Parser<'src> {
         }
     }
 
-    pub fn parse(&mut self) -> Program {
+    pub fn parse(&mut self) -> Result<Module> {
         let mut expressions = Vec::new();
-        while let Some(e) = self.expression() {
+        while let Ok(e) = self.expression() {
             expressions.push(e)
         }
-        Program { expressions }
+        Ok(Module { expressions })
     }
 
-    fn expression(&mut self) -> Option<Expression> {
-        self.eat().and_then(|token: Token| {
+    fn expression(&mut self) -> Result<Expression> {
+        match self.peek().ok_or("Unexpected EOF")?.kind {
+            TokenKind::Str => self.literal(),
+            _ => Err("todo")
+        }
+    }
+
+    fn literal(&mut self) -> Result<Expression> {
+        if let Some(token) = self.eat() {
             match token.kind {
-                TokenKind::Str => Some(Expression::Literal { token }),
-                TokenKind::Identifier => self.call(token),
-                _ => None
+                TokenKind::Str => Ok(Expression::Literal { token }),
+                _ => Err("Unexpected token")
             }
-        })
+        } else {
+            Err("Unexpected EOF")
+        }
     }
 
-    fn call(&mut self, _identifier: Token) -> Option<Expression> {
+    fn call(&mut self, _identifier: Token) -> Result<Expression> {
         todo!()
     }
 
@@ -57,5 +66,15 @@ impl<'src> Parser<'src> {
 
     fn peek(&self) -> Option<Token> {
         self.lexer.clone().next()
+    }
+
+    fn expect(&mut self, token_kind: TokenKind, msg: &'static str) -> Result<Token> {
+        if let Some(token) = self.peek() {
+            if token.kind == token_kind {
+                self.eat();
+                return Ok(token)
+            }
+        }
+        return Err(msg)
     }
 }
