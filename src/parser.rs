@@ -1,4 +1,5 @@
 use crate::lexer::{Lexer, Token, TokenKind};
+use crate::parser::Expression::Call;
 
 #[derive(Debug)]
 pub struct Module {
@@ -7,14 +8,8 @@ pub struct Module {
 
 #[derive(Debug)]
 pub enum Expression {
-    Call(Call),
+    Call { callee: Token, args: Vec<Expression> },
     Literal { token: Token }
-}
-
-#[derive(Debug)]
-pub struct Call {
-    pub callee: Box<Expression>,
-    pub args: Vec<Expression>
 }
 
 type Result<T> = std::result::Result<T, &'static str>;
@@ -41,6 +36,7 @@ impl<'src> Parser<'src> {
     fn expression(&mut self) -> Result<Expression> {
         match self.peek().ok_or("Unexpected EOF")?.kind {
             TokenKind::Str => self.literal(),
+            TokenKind::Identifier => self.call(),
             _ => Err("todo")
         }
     }
@@ -56,8 +52,11 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn call(&mut self, _identifier: Token) -> Result<Expression> {
-        todo!()
+    fn call(&mut self) -> Result<Expression> {
+        let identifier = self.expect(TokenKind::Identifier)?;
+        self.expect(TokenKind::LParen)?;
+        let arg = self.expression()?;
+        Ok(Expression::Call { callee: identifier, args: vec![arg] })
     }
 
     fn eat(&mut self) -> Option<Token> {
@@ -68,13 +67,13 @@ impl<'src> Parser<'src> {
         self.lexer.clone().next()
     }
 
-    fn expect(&mut self, token_kind: TokenKind, msg: &'static str) -> Result<Token> {
+    fn expect(&mut self, token_kind: TokenKind) -> Result<Token> {
         if let Some(token) = self.peek() {
             if token.kind == token_kind {
                 self.eat();
                 return Ok(token)
             }
         }
-        return Err(msg)
+        return Err("Unexpected token")
     }
 }

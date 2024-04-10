@@ -4,7 +4,7 @@ mod lexer;
 mod parser;
 
 fn main() {
-    let code = "\"hello world\"\"world\"";
+    let code = "print(\"hello\"";
     let mut parser = Parser::new(code);
     let program = parser.parse().unwrap();
     println!("{:#?}", program);
