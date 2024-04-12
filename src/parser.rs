@@ -1,5 +1,6 @@
+use std::borrow::Cow;
+
 use crate::lexer::{Lexer, Token, TokenKind};
-use crate::parser::Expression::Call;
 
 #[derive(Debug)]
 pub struct Module {
@@ -12,43 +13,59 @@ pub enum Expression {
     Literal { token: Token }
 }
 
-type Result<T> = std::result::Result<T, &'static str>;
+#[derive(Debug)]
+pub struct ParseError {
+    msg: Cow<'static, str>,
+    start: usize,
+    end: usize,
+}
+
+type Result<T> = std::result::Result<T, ParseError>;
 
 pub struct Parser<'src> {
+    token: Option<Token>,
     lexer: Lexer<'src>,
 }
 
 impl<'src> Parser<'src> {
     pub fn new(source: &'src str) -> Self {
+        let mut lexer = Lexer::new(source.chars());
         Parser {
-            lexer: Lexer::new(source.chars())
+            token: lexer.next(),
+            lexer
         }
     }
 
     pub fn parse(&mut self) -> Result<Module> {
         let mut expressions = Vec::new();
-        while let Ok(e) = self.expression() {
-            expressions.push(e)
+        while self.token.is_some() {
+            let expr = self.expression()?;
+            expressions.push(expr);
         }
         Ok(Module { expressions })
     }
 
     fn expression(&mut self) -> Result<Expression> {
-        match self.peek().ok_or("Unexpected EOF")?.kind {
+        match self.peek()?.kind {
             TokenKind::Str => self.literal(),
             TokenKind::Identifier => self.call(),
-            _ => Err("todo")
+            _ => Err(ParseError {
+                msg: "Unexpected token".into(),
+                start: 0,
+                end: 0,
+            })
         }
     }
 
     fn literal(&mut self) -> Result<Expression> {
-        if let Some(token) = self.eat() {
-            match token.kind {
-                TokenKind::Str => Ok(Expression::Literal { token }),
-                _ => Err("Unexpected token")
-            }
-        } else {
-            Err("Unexpected EOF")
+        let token = self.eat()?;
+        match token.kind {
+            TokenKind::Str => Ok(Expression::Literal { token }),
+            _ => Err(ParseError {
+                msg: format!("Unexpected token {:?}", token.kind).into(),
+                start: token.start,
+                end: token.end,
+            })
         }
     }
 
@@ -59,21 +76,34 @@ impl<'src> Parser<'src> {
         Ok(Expression::Call { callee: identifier, args: vec![arg] })
     }
 
-    fn eat(&mut self) -> Option<Token> {
-        self.lexer.next()
+    fn eat(&mut self) -> Result<Token> {
+        let prev= self.peek()?;
+        self.advance();
+        Ok(prev)
     }
 
-    fn peek(&self) -> Option<Token> {
-        self.lexer.clone().next()
+    fn advance(&mut self) {
+        self.token = self.lexer.next();
+    }
+
+    fn peek(&self) -> Result<Token> {
+        self.token.ok_or(ParseError {
+            msg: "Unexpected EOF".into(),
+            start: 0,
+            end: 0,
+        })
     }
 
     fn expect(&mut self, token_kind: TokenKind) -> Result<Token> {
-        if let Some(token) = self.peek() {
-            if token.kind == token_kind {
-                self.eat();
-                return Ok(token)
-            }
+        let token = self.peek()?;
+        if self.peek()?.kind == token_kind {
+            self.advance();
+            return Ok(token)
         }
-        return Err("Unexpected token")
+        return Err(ParseError {
+            msg: format!("Expected token {:?}, got {:?}", token_kind, token.kind).into(),
+            start: token.start,
+            end: token.end,
+        })
     }
 }
