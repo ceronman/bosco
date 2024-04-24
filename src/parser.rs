@@ -1,21 +1,27 @@
-use std::borrow::Cow;
+#[cfg(test)]
+mod test;
 
 use crate::lexer::{Lexer, Token, TokenKind};
 
 #[derive(Debug)]
 pub struct Module {
-    pub expressions: Vec<Expression>
+    pub expressions: Vec<Expression>,
 }
 
 #[derive(Debug)]
 pub enum Expression {
-    Call { callee: Token, args: Vec<Expression> },
-    Literal { token: Token }
+    Call {
+        callee: Token,
+        args: Vec<Expression>,
+    },
+    Literal {
+        token: Token,
+    },
 }
 
 #[derive(Debug)]
 pub struct ParseError {
-    msg: Cow<'static, str>,
+    msg: String,
     start: usize,
     end: usize,
 }
@@ -32,7 +38,7 @@ impl<'src> Parser<'src> {
         let mut lexer = Lexer::new(source.chars());
         Parser {
             token: lexer.next(),
-            lexer
+            lexer,
         }
     }
 
@@ -49,11 +55,11 @@ impl<'src> Parser<'src> {
         match self.peek()?.kind {
             TokenKind::Str => self.literal(),
             TokenKind::Identifier => self.call(),
-            _ => Err(ParseError {
-                msg: "Unexpected token".into(),
+            t => Err(ParseError {
+                msg: format!("Unexpected token {:?}", t),
                 start: 0,
                 end: 0,
-            })
+            }),
         }
     }
 
@@ -62,10 +68,10 @@ impl<'src> Parser<'src> {
         match token.kind {
             TokenKind::Str => Ok(Expression::Literal { token }),
             _ => Err(ParseError {
-                msg: format!("Unexpected token {:?}", token.kind).into(),
+                msg: format!("Unexpected token {:?}", token.kind),
                 start: token.start,
                 end: token.end,
-            })
+            }),
         }
     }
 
@@ -73,11 +79,15 @@ impl<'src> Parser<'src> {
         let identifier = self.expect(TokenKind::Identifier)?;
         self.expect(TokenKind::LParen)?;
         let arg = self.expression()?;
-        Ok(Expression::Call { callee: identifier, args: vec![arg] })
+        self.expect(TokenKind::RParen)?;
+        Ok(Expression::Call {
+            callee: identifier,
+            args: vec![arg],
+        })
     }
 
     fn eat(&mut self) -> Result<Token> {
-        let prev= self.peek()?;
+        let prev = self.peek()?;
         self.advance();
         Ok(prev)
     }
@@ -98,12 +108,12 @@ impl<'src> Parser<'src> {
         let token = self.peek()?;
         if self.peek()?.kind == token_kind {
             self.advance();
-            return Ok(token)
+            return Ok(token);
         }
         return Err(ParseError {
-            msg: format!("Expected token {:?}, got {:?}", token_kind, token.kind).into(),
+            msg: format!("Expected token {:?}, got {:?}", token_kind, token.kind),
             start: token.start,
             end: token.end,
-        })
+        });
     }
 }

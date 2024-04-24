@@ -1,4 +1,4 @@
-use std::str::{Chars};
+use std::str::Chars;
 
 #[cfg(test)]
 mod test;
@@ -46,7 +46,7 @@ pub struct Lexer<'src> {
     chars: Chars<'src>,
     start: usize,
     offset: usize,
-    lexeme: String
+    lexeme: String,
 }
 
 impl<'src> Lexer<'src> {
@@ -55,7 +55,7 @@ impl<'src> Lexer<'src> {
             chars,
             start: 0,
             offset: 0,
-            lexeme: String::with_capacity(32)
+            lexeme: String::with_capacity(32),
         }
     }
 
