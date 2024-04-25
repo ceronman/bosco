@@ -31,6 +31,7 @@ pub enum TokenKind {
 
     UnterminatedCommentError,
     Error,
+    Eof,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -59,18 +60,21 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn token(&mut self) -> Option<Token> {
+    pub fn next_token(&mut self) -> Token {
         self.lexeme.clear();
         self.start = self.offset;
+        let c = self.eat();
 
-        self.eat().map(|c| Token {
+        Token {
             kind: self.token_kind(c),
             start: self.start,
             end: self.offset,
-        })
+        }
     }
 
-    fn token_kind(&mut self, c: char) -> TokenKind {
+    fn token_kind(&mut self, c: Option<char>) -> TokenKind {
+        let Some(c) = c else { return TokenKind::Eof };
+
         match c {
             ' ' | '\t' | '\r' => self.whitespace(),
             '\n' => TokenKind::Eol,
@@ -179,13 +183,5 @@ impl<'src> Lexer<'src> {
 
     fn peek(&self) -> Option<char> {
         self.chars.clone().next()
-    }
-}
-
-impl<'source> Iterator for Lexer<'source> {
-    type Item = Token;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.token()
     }
 }

@@ -1,8 +1,16 @@
-use super::{Lexer, Token, TokenKind};
+use super::{Lexer, TokenKind};
 use TokenKind::*;
 
 fn test_lexer(code: &str, expected: Vec<TokenKind>, skip_ws: bool) {
-    let tokens: Vec<Token> = Lexer::new(code.chars()).collect();
+    let mut lexer = Lexer::new(code.chars());
+    let mut tokens = Vec::new();
+    loop {
+        let token = lexer.next_token();
+        if token.kind == Eof {
+            break;
+        }
+        tokens.push(token);
+    }
 
     let kinds: Vec<TokenKind> = tokens
         .clone()
