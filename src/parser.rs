@@ -21,20 +21,20 @@ pub enum Expression {
 
 #[derive(Debug)]
 pub struct ParseError {
-    msg: String,
-    start: usize,
-    end: usize,
+    pub msg: String,
+    pub start: usize,
+    pub end: usize,
 }
 
 type Result<T> = std::result::Result<T, ParseError>;
 
-pub struct Parser<'src> {
+struct Parser<'src> {
     token: Token,
     lexer: Lexer<'src>,
 }
 
 impl<'src> Parser<'src> {
-    pub fn new(source: &'src str) -> Self {
+    fn new(source: &'src str) -> Self {
         let mut lexer = Lexer::new(source.chars());
         Parser {
             token: lexer.next_token(),
@@ -42,7 +42,7 @@ impl<'src> Parser<'src> {
         }
     }
 
-    pub fn parse(&mut self) -> Result<Module> {
+    fn parse(&mut self) -> Result<Module> {
         let mut expressions = Vec::new();
         while self.token.kind != TokenKind::Eof {
             let expr = self.expression()?;
@@ -109,4 +109,9 @@ impl<'src> Parser<'src> {
             end: token.end,
         })
     }
+}
+
+pub fn parse(src: &str) -> Result<Module> {
+    let mut parser = Parser::new(src);
+    parser.parse()
 }

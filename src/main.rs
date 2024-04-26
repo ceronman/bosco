@@ -1,11 +1,10 @@
-use crate::parser::Parser;
+use crate::interpreter::interpret;
 
+mod interpreter;
 mod lexer;
 mod parser;
 
 fn main() {
-    let code = "print(\"hello\")";
-    let mut parser = Parser::new(code);
-    let program = parser.parse().unwrap();
-    println!("{:#?}", program);
+    let code = "print(\"hello world\")";
+    interpret(code);
 }
