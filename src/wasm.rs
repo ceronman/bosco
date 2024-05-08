@@ -1,8 +1,8 @@
 #[derive(Debug, Clone)]
 pub struct Module {
-    importedFunctions: Vec<FunctionImport>,
+    imported_functions: Vec<FunctionImport>,
     data: Vec<Data>,
-    definedFunctions: Vec<FunctionDefinition>
+    defined_functions: Vec<FunctionDefinition>
 }
 
 #[derive(Debug, Clone)]
