@@ -1,9 +1,10 @@
 use crate::interpreter::interpret;
 
 mod interpreter;
+mod ir;
 mod lexer;
 mod parser;
-mod wasm;
+mod wat;
 
 fn main() {
     let code = "print(\"hello world\")";
