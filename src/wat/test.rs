@@ -62,15 +62,23 @@ fn hello_world_encoder() {
     types.function(vec![ValType::I32, ValType::I32], vec![]);
     types.function(vec![], vec![]);
     imports.import("js", "print", EntityType::Function(0));
-    imports.import("js", "mem", EntityType::Memory(MemoryType {
-        minimum: 0,
-        maximum: None,
-        memory64: false,
-        shared: false,
-        page_size_log2: None,
-    }));
+    imports.import(
+        "js",
+        "mem",
+        EntityType::Memory(MemoryType {
+            minimum: 0,
+            maximum: None,
+            memory64: false,
+            shared: false,
+            page_size_log2: None,
+        }),
+    );
     let mut data = DataSection::new();
-    data.active(0, &ConstExpr::i32_const(0), "Hello from Wasm Encoder!".bytes());
+    data.active(
+        0,
+        &ConstExpr::i32_const(0),
+        "Hello from Wasm Encoder!".bytes(),
+    );
 
     let mut functions = FunctionSection::new();
     functions.function(1);
