@@ -3,7 +3,7 @@ use std::str::Chars;
 #[cfg(test)]
 mod test;
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
 pub enum TokenKind {
     Plus,
     Minus,
@@ -34,7 +34,7 @@ pub enum TokenKind {
     Eof,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Token {
     pub kind: TokenKind,
     pub start: usize,

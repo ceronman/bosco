@@ -56,7 +56,6 @@ fn hello_world() {
 fn hello_world_encoder() {
     use wasm_encoder::*;
 
-    let mut module = Module::new();
     let mut imports = ImportSection::new();
     let mut types = TypeSection::new();
     types.function(vec![ValType::I32, ValType::I32], vec![]);
@@ -91,12 +90,24 @@ fn hello_world_encoder() {
     function.instruction(&Instruction::End);
     codes.function(&function);
 
+    let mut exports = ExportSection::new();
+    exports.export("hello", ExportKind::Func, 1);
+
+    let mut module = Module::new();
+
+    println!("{:#?}", types);
+    println!("{:#?}", imports);
+    println!("{:#?}", data);
+    println!("{:#?}", functions);
+    println!("{:#?}", codes);
+    println!("{:#?}", exports);
+
     module.section(&types);
     module.section(&imports);
     module.section(&data);
     module.section(&functions);
     module.section(&codes);
-    module.section(ExportSection::new().export("hello", ExportKind::Func, 1));
+    module.section(&exports);
 
     let bytes = module.finish();
 

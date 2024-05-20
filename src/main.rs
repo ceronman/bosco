@@ -5,6 +5,7 @@ mod ir;
 mod lexer;
 mod parser;
 mod wat;
+mod compiler;
 
 fn main() {
     let code = "print(\"hello world\")";

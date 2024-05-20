@@ -1,5 +1,5 @@
 use crate::lexer::Token;
-use crate::parser::{Expression, Module, Parser};
+use crate::parser::{Expression, Module, parse, Parser};
 
 trait SExpr {
     fn s_expr(&self, src: &str) -> String;
@@ -41,8 +41,7 @@ impl SExpr for Vec<Expression> {
 }
 
 fn s_expr(src: &str) -> String {
-    let mut parser = Parser::new(&src);
-    let program = parser.parse().unwrap();
+    let program = parse(src).unwrap();
     program.s_expr(&src)
 }
 
