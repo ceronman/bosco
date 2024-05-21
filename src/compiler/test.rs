@@ -1,10 +1,16 @@
-use std::io::Write;
-use crate::compiler::Compiler;
-use crate::parser::parse;
-
 #[test]
 fn hello_world_compile() {
-    let src = "print(\"Hello from Wasm Compiler!\")";
+    use crate::compiler::Compiler;
+    use crate::parser::parse;
+    use std::io::Write;
+
+    let src = r#"
+        
+        print("Hello")
+        print("from")
+        print("Bosco!")
+    
+    "#;
     let module = parse(src).unwrap();
     let mut compiler = Compiler::new(src);
     let bytes = compiler.compile(&module);
@@ -12,7 +18,8 @@ fn hello_world_compile() {
         .create(true)
         .write(true)
         .truncate(true)
-        .open("web/hello.wasm").unwrap();
+        .open("web/hello.wasm")
+        .unwrap();
     f.write_all(&bytes).unwrap();
     f.flush().unwrap();
 

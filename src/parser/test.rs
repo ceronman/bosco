@@ -1,5 +1,5 @@
 use crate::lexer::Token;
-use crate::parser::{Expression, Module, parse, Parser};
+use crate::parser::{parse, Expression, Module};
 
 trait SExpr {
     fn s_expr(&self, src: &str) -> String;

@@ -72,6 +72,16 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    pub fn skip_ws(&mut self) -> Token {
+        loop {
+            let token = self.next_token();
+            match token.kind {
+                TokenKind::Eol | TokenKind::Whitespace => continue,
+                _ => return token,
+            }
+        }
+    }
+
     fn token_kind(&mut self, c: Option<char>) -> TokenKind {
         let Some(c) = c else { return TokenKind::Eof };
 

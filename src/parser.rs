@@ -37,7 +37,7 @@ impl<'src> Parser<'src> {
     fn new(source: &'src str) -> Self {
         let mut lexer = Lexer::new(source.chars());
         Parser {
-            token: lexer.next_token(),
+            token: lexer.skip_ws(),
             lexer,
         }
     }
@@ -88,7 +88,7 @@ impl<'src> Parser<'src> {
 
     fn eat(&mut self) -> Token {
         let prev = self.token;
-        self.token = self.lexer.next_token();
+        self.token = self.lexer.skip_ws();
         prev
     }
 
@@ -99,7 +99,7 @@ impl<'src> Parser<'src> {
     fn expect(&mut self, token_kind: TokenKind) -> Result<Token> {
         let token = self.peek();
         if token.kind == token_kind {
-            self.token = self.lexer.next_token();
+            self.token = self.lexer.skip_ws();
             return Ok(token);
         }
 
