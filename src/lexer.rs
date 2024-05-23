@@ -3,6 +3,7 @@ use std::str::Chars;
 #[cfg(test)]
 mod test;
 
+// TODO: Re-think the need for Hash
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
 pub enum TokenKind {
     Plus,
@@ -34,6 +35,7 @@ pub enum TokenKind {
     Eof,
 }
 
+// TODO: Re-think the need for Hash
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Token {
     pub kind: TokenKind,
@@ -41,27 +43,24 @@ pub struct Token {
     pub end: usize,
 }
 
-// TODO: Clone is expensive here because of the String
-#[derive(Debug, Clone)]
 pub struct Lexer<'src> {
+    source: &'src str,
     chars: Chars<'src>,
     start: usize,
     offset: usize,
-    lexeme: String,
 }
 
 impl<'src> Lexer<'src> {
-    pub fn new(chars: Chars<'src>) -> Self {
+    pub fn new(source: &'src str) -> Self {
         Self {
-            chars,
+            source,
+            chars: source.chars(),
             start: 0,
             offset: 0,
-            lexeme: String::with_capacity(32),
         }
     }
 
     pub fn next_token(&mut self) -> Token {
-        self.lexeme.clear();
         self.start = self.offset;
         let c = self.eat();
 
@@ -174,7 +173,7 @@ impl<'src> Lexer<'src> {
                 break;
             }
         }
-        match self.lexeme.as_str() {
+        match &self.source[self.start..self.offset] {
             "true" => TokenKind::True,
             "false" => TokenKind::False,
             _ => TokenKind::Identifier,
@@ -183,7 +182,6 @@ impl<'src> Lexer<'src> {
 
     fn eat(&mut self) -> Option<char> {
         if let Some(c) = self.chars.next() {
-            self.lexeme.push(c);
             self.offset += c.len_utf8();
             Some(c)
         } else {

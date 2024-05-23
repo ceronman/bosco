@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod test;
 
+use std::error::Error;
+use std::fmt::{Display, Formatter};
 use crate::lexer::{Lexer, Token, TokenKind};
 
 #[derive(Debug)]
@@ -26,6 +28,14 @@ pub struct ParseError {
     pub end: usize,
 }
 
+impl Display for ParseError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.msg)
+    }
+}
+
+impl Error for ParseError {}
+
 type Result<T> = std::result::Result<T, ParseError>;
 
 struct Parser<'src> {
@@ -35,7 +45,7 @@ struct Parser<'src> {
 
 impl<'src> Parser<'src> {
     fn new(source: &'src str) -> Self {
-        let mut lexer = Lexer::new(source.chars());
+        let mut lexer = Lexer::new(source);
         Parser {
             token: lexer.skip_ws(),
             lexer,

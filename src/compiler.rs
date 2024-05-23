@@ -9,7 +9,7 @@ use wasm_encoder::{
 
 use crate::lexer::Token;
 use crate::parser;
-use crate::parser::{parse, Expression};
+use crate::parser::{parse, Expression, ParseError};
 
 #[derive(Clone, Copy)]
 struct WasmStr {
@@ -64,7 +64,7 @@ impl<'src> Compiler<'src> {
                         self.strings.insert(*token, wasm_str);
                         self.data.active(
                             wasm_str.memory,
-                            &ConstExpr::i32_const(wasm_str.offset as i32), // TODO: i32?
+                            &ConstExpr::i32_const(wasm_str.offset as i32),
                             value.bytes(),
                         );
                     }
@@ -101,7 +101,6 @@ impl<'src> Compiler<'src> {
     }
 
     fn compile(&mut self, module: &parser::Module) -> Vec<u8> {
-        // TODO: Result, error handling.
         let print_idx = self.import_function("js", "print", &[ValType::I32, ValType::I32], &[]);
         self.fn_indices.insert("print", print_idx);
         self.import_memory();
@@ -128,10 +127,7 @@ impl<'src> Compiler<'src> {
         results: &[ValType],
     ) -> u32 {
         let type_idx = self.types.len();
-        // TODO: Figure this out without having to create vectors!
-        let p = params.to_vec();
-        let r = results.to_vec();
-        self.types.function(p, r);
+        self.types.function(params.iter().copied(), results.iter().copied());
         let import_idx = self.imports.len();
         self.imports
             .import(module, name, EntityType::Function(type_idx));
@@ -153,8 +149,8 @@ impl<'src> Compiler<'src> {
     }
 }
 
-pub fn compile(source: &str) -> Vec<u8> {
-    let module = parse(source).unwrap();
+pub fn compile(source: &str) -> Result<Vec<u8>, ParseError> {
+    let module = parse(source)?;
     let mut compiler = Compiler::new(source);
-    compiler.compile(&module)
+    Ok(compiler.compile(&module))
 }
