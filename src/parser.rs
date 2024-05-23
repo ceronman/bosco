@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod test;
 
+use crate::lexer::{Lexer, Token, TokenKind};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
-use crate::lexer::{Lexer, Token, TokenKind};
 
 #[derive(Debug)]
 pub struct Module {

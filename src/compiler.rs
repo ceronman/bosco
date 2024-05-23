@@ -127,7 +127,8 @@ impl<'src> Compiler<'src> {
         results: &[ValType],
     ) -> u32 {
         let type_idx = self.types.len();
-        self.types.function(params.iter().copied(), results.iter().copied());
+        self.types
+            .function(params.iter().copied(), results.iter().copied());
         let import_idx = self.imports.len();
         self.imports
             .import(module, name, EntityType::Function(type_idx));

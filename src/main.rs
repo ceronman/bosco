@@ -8,10 +8,14 @@ mod parser;
 
 fn main() {
     let code = r#"
+        1
         print("Hello")
         print("from")
         print("Bosco!")
     "#;
-    compile(code);
+    if let Err(error) = compile(code) {
+        eprintln!("Compile error:\n{error}");
+        std::process::exit(1);
+    }
     interpret(code);
 }
