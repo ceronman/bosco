@@ -11,6 +11,8 @@ pub enum TokenKind {
     Slash,
     Star,
 
+    Equals,
+
     LParen,
     RParen,
     LBrace,
@@ -24,6 +26,8 @@ pub enum TokenKind {
     Number,
     Identifier,
     Str,
+
+    Let,
 
     LineComment,
     BlockComment,
@@ -75,7 +79,7 @@ impl<'src> Lexer<'src> {
         loop {
             let token = self.next_token();
             match token.kind {
-                TokenKind::Eol | TokenKind::Whitespace => continue,
+                TokenKind::Whitespace => continue,
                 _ => return token,
             }
         }
@@ -86,7 +90,7 @@ impl<'src> Lexer<'src> {
 
         match c {
             ' ' | '\t' | '\r' => self.whitespace(),
-            '\n' => TokenKind::Eol,
+            '\n' => self.eol(),
             '+' => TokenKind::Plus,
             '-' => TokenKind::Minus,
             '*' => TokenKind::Star,
@@ -95,6 +99,7 @@ impl<'src> Lexer<'src> {
                 Some('*') => self.block_comment(),
                 _ => TokenKind::Slash,
             },
+            '=' => TokenKind::Equals,
             '(' => TokenKind::LParen,
             ')' => TokenKind::RParen,
             '{' => TokenKind::LBrace,
@@ -106,6 +111,13 @@ impl<'src> Lexer<'src> {
             c if c == '_' || c.is_alphabetic() => self.identifier(),
             _ => TokenKind::Error,
         }
+    }
+
+    fn eol(&mut self) -> TokenKind {
+        while let Some('\n' | '\r') = self.peek() {
+            self.eat();
+        }
+        TokenKind::Eol
     }
 
     fn whitespace(&mut self) -> TokenKind {
@@ -176,6 +188,7 @@ impl<'src> Lexer<'src> {
         match &self.source[self.start..self.offset] {
             "true" => TokenKind::True,
             "false" => TokenKind::False,
+            "let" => TokenKind::Let,
             _ => TokenKind::Identifier,
         }
     }

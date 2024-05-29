@@ -2,7 +2,7 @@ use super::{Lexer, TokenKind};
 use TokenKind::*;
 
 fn test_lexer(code: &str, expected: Vec<TokenKind>, skip_ws: bool) {
-    let mut lexer = Lexer::new(code.chars());
+    let mut lexer = Lexer::new(code);
     let mut tokens = Vec::new();
     loop {
         let token = lexer.next_token();
@@ -122,6 +122,50 @@ fn block_comment_unterminated() {
     test_lexer(
         "one /* comment never terminated",
         vec![Identifier, UnterminatedCommentError],
+        true,
+    );
+}
+
+#[test]
+fn let_declaration() {
+    test_lexer(
+        r#" let foo = 1"#,
+        vec![Let, Identifier, Equals, Number],
+        true,
+    );
+}
+
+#[test]
+fn collapsed_eol() {
+    test_lexer(
+        r#"
+            a
+
+
+            b
+
+
+            c
+        "#,
+        vec![Eol, Identifier, Eol, Identifier, Eol, Identifier, Eol],
+        true,
+    );
+}
+
+#[test]
+fn arithmetic_expressions() {
+    test_lexer(
+        r#"
+            let a = 1
+            let b = 2
+            let c = 3
+            let x = (a + b) - (a + c)
+        "#,
+        vec![
+            Eol, Let, Identifier, Equals, Number, Eol, Let, Identifier, Equals, Number, Eol, Let,
+            Identifier, Equals, Number, Eol, Let, Identifier, Equals, LParen, Identifier, Plus,
+            Identifier, RParen, Minus, LParen, Identifier, Plus, Identifier, RParen, Eol,
+        ],
         true,
     );
 }

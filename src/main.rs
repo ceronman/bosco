@@ -1,8 +1,6 @@
 use crate::compiler::compile;
-use crate::interpreter::interpret;
 
 mod compiler;
-mod interpreter;
 mod lexer;
 mod parser;
 
@@ -17,5 +15,4 @@ fn main() {
         eprintln!("Compile error:\n{error}");
         std::process::exit(1);
     }
-    interpret(code);
 }

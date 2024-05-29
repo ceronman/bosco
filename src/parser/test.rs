@@ -7,7 +7,7 @@ trait SExpr {
 
 impl SExpr for Module {
     fn s_expr(&self, src: &str) -> String {
-        format!("(module {})", self.expressions.s_expr(&src))
+        format!("(module {})", self.expressions.s_expr(src))
     }
 }
 
@@ -21,9 +21,12 @@ impl SExpr for Expression {
     fn s_expr(&self, src: &str) -> String {
         match self {
             Expression::Call { callee, args } => {
-                format!("(call {} {})", callee.s_expr(&src), args.s_expr(&src))
+                format!("(call {} {})", callee.s_expr(src), args.s_expr(src))
             }
-            Expression::Literal { token } => token.s_expr(&src),
+            Expression::Declaration { name, value } => {
+                format!("(let {} {})", name.s_expr(src), value.s_expr(src))
+            }
+            Expression::Literal { token } => token.s_expr(src),
         }
     }
 }
@@ -42,11 +45,33 @@ impl SExpr for Vec<Expression> {
 
 fn s_expr(src: &str) -> String {
     let program = parse(src).unwrap();
-    program.s_expr(&src)
+    program.s_expr(src)
 }
 
 #[test]
 fn test_simple_call() {
     let s = s_expr("print(\"hello\")");
     assert_eq!(s, "(module ((call print (\"hello\"))))");
+}
+
+#[test]
+fn test_simple_call_with_ws() {
+    let s = s_expr(
+        r#"
+
+        print("Hello world")
+
+    "#,
+    );
+    assert_eq!(s, "(module ((call print (\"Hello world\"))))");
+}
+
+#[test]
+fn test_let_declaration() {
+    let s = s_expr(
+        r#"
+        let a = 1
+    "#,
+    );
+    assert_eq!(s, "(module ((let a 1)))");
 }

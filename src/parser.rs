@@ -16,6 +16,10 @@ pub enum Expression {
         callee: Token,
         args: Vec<Expression>,
     },
+    Declaration {
+        name: Token,
+        value: Box<Expression>,
+    },
     Literal {
         token: Token,
     },
@@ -55,16 +59,19 @@ impl<'src> Parser<'src> {
     fn parse(&mut self) -> Result<Module> {
         let mut expressions = Vec::new();
         while self.token.kind != TokenKind::Eof {
+            self.maybe_eol();
             let expr = self.expression()?;
             expressions.push(expr);
+            self.maybe_eol();
         }
         Ok(Module { expressions })
     }
 
     fn expression(&mut self) -> Result<Expression> {
         match self.token.kind {
-            TokenKind::Str => self.literal(),
+            TokenKind::Str | TokenKind::Number => self.literal(),
             TokenKind::Identifier => self.call(),
+            TokenKind::Let => self.declaration(),
             other_kind => Err(ParseError {
                 msg: format!("Expected expression, got {:?}", other_kind),
                 start: self.token.start,
@@ -76,7 +83,7 @@ impl<'src> Parser<'src> {
     fn literal(&mut self) -> Result<Expression> {
         let token = self.eat();
         match token.kind {
-            TokenKind::Str => Ok(Expression::Literal { token }),
+            TokenKind::Str | TokenKind::Number => Ok(Expression::Literal { token }),
             _ => Err(ParseError {
                 msg: format!("Expected literal, got {:?}", token.kind),
                 start: token.start,
@@ -94,6 +101,23 @@ impl<'src> Parser<'src> {
             callee: identifier,
             args: vec![arg],
         })
+    }
+
+    fn declaration(&mut self) -> Result<Expression> {
+        self.expect(TokenKind::Let)?;
+        let name = self.expect(TokenKind::Identifier)?;
+        self.expect(TokenKind::Equals)?;
+        let value = self.expression()?;
+        Ok(Expression::Declaration {
+            name,
+            value: Box::new(value),
+        })
+    }
+
+    fn maybe_eol(&mut self) {
+        while let TokenKind::Eol = self.peek().kind {
+            self.eat();
+        }
     }
 
     fn eat(&mut self) -> Token {
