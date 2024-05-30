@@ -18,6 +18,7 @@ pub enum Expression {
     },
     Declaration {
         name: Token,
+        ty: Token,
         value: Box<Expression>,
     },
     Literal {
@@ -106,10 +107,12 @@ impl<'src> Parser<'src> {
     fn declaration(&mut self) -> Result<Expression> {
         self.expect(TokenKind::Let)?;
         let name = self.expect(TokenKind::Identifier)?;
+        let ty = self.expect(TokenKind::Identifier)?;
         self.expect(TokenKind::Equals)?;
         let value = self.expression()?;
         Ok(Expression::Declaration {
             name,
+            ty,
             value: Box::new(value),
         })
     }

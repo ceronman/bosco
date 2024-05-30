@@ -23,8 +23,8 @@ impl SExpr for Expression {
             Expression::Call { callee, args } => {
                 format!("(call {} {})", callee.s_expr(src), args.s_expr(src))
             }
-            Expression::Declaration { name, value } => {
-                format!("(let {} {})", name.s_expr(src), value.s_expr(src))
+            Expression::Declaration { name, ty, value } => {
+                format!("(let {} {} {})", name.s_expr(src), ty.s_expr(&src), value.s_expr(src))
             }
             Expression::Literal { token } => token.s_expr(src),
         }
@@ -70,8 +70,8 @@ fn test_simple_call_with_ws() {
 fn test_let_declaration() {
     let s = s_expr(
         r#"
-        let a = 1
+        let a i32 = 1
     "#,
     );
-    assert_eq!(s, "(module ((let a 1)))");
+    assert_eq!(s, "(module ((let a i32 1)))");
 }
