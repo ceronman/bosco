@@ -19,9 +19,10 @@ pub enum Expression {
     Declaration {
         name: Token,
         ty: Token,
-        value: Box<Expression>,
+        value: Box<Expression>, // TODO: Support optional values
     },
     Literal {
+        // TODO: Support proper types here
         token: Token,
     },
 }

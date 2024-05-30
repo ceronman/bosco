@@ -24,7 +24,12 @@ impl SExpr for Expression {
                 format!("(call {} {})", callee.s_expr(src), args.s_expr(src))
             }
             Expression::Declaration { name, ty, value } => {
-                format!("(let {} {} {})", name.s_expr(src), ty.s_expr(&src), value.s_expr(src))
+                format!(
+                    "(let {} {} {})",
+                    name.s_expr(src),
+                    ty.s_expr(&src),
+                    value.s_expr(src)
+                )
             }
             Expression::Literal { token } => token.s_expr(src),
         }

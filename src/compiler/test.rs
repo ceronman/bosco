@@ -5,7 +5,7 @@ fn hello_world_compile() {
     use std::io::Write;
 
     let src = r#"
-        
+        let a i32 = 256
         print("Hello")
         print("from")
         print("Bosco!")
