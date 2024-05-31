@@ -47,6 +47,7 @@ pub struct Token {
     pub end: usize,
 }
 
+#[derive(Clone)]
 pub struct Lexer<'src> {
     source: &'src str,
     chars: Chars<'src>,

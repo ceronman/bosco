@@ -6,10 +6,15 @@ function print(offset: number, length: number) {
     console.log(string);
 }
 
+function print_num(number: number) {
+    console.log(number)
+}
+
 const importObject = {
     "js": {
         "mem": memory,
-        "print": print
+        "print": print,
+        "print_num": print_num
     },
 };
 
@@ -17,5 +22,8 @@ const importObject = {
 let file = await Deno.readFile("hello.wasm");
 let module = new WebAssembly.Module(file);
 let instance = new WebAssembly.Instance(module, importObject);
+
+console.log("Starting...")
+
 // @ts-ignore
 instance.exports.hello();

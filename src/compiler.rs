@@ -1,5 +1,3 @@
-mod test;
-
 use std::collections::HashMap;
 
 use wasm_encoder::{
@@ -7,9 +5,11 @@ use wasm_encoder::{
     FunctionSection, ImportSection, Instruction, MemoryType, TypeSection, ValType,
 };
 
-use crate::lexer::{Token, TokenKind};
+use crate::lexer::Token;
 use crate::parser;
-use crate::parser::{parse, Expression, ParseError};
+use crate::parser::{parse, Expression, Literal, ParseError};
+
+mod test;
 
 #[derive(Clone, Copy)]
 struct WasmStr {
@@ -21,7 +21,7 @@ struct WasmStr {
 struct Compiler<'src> {
     source: &'src str,
     strings: HashMap<Token, WasmStr>,
-    locals: HashMap<Token, (u32, ValType)>,
+    locals: HashMap<&'src str, (u32, ValType)>,
     fn_indices: HashMap<&'static str, u32>,
     types: TypeSection,
     functions: FunctionSection,
@@ -30,12 +30,6 @@ struct Compiler<'src> {
     data_offset: u32,
     imports: ImportSection,
     exports: ExportSection,
-}
-
-impl Token {
-    fn lexeme(self, source: &str) -> &str {
-        &source[self.start..self.end]
-    }
 }
 
 impl<'src> Compiler<'src> {
@@ -57,27 +51,29 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    // TODO: Better name
-    fn fill_strings(&mut self, module: &parser::Module) {
+    fn resolve(&mut self, module: &parser::Module) {
         for expr in &module.expressions {
             match expr {
-                Expression::Literal { token } => {
-                    let value = &self.source[token.start + 1..token.end - 1];
-                    let wasm_str = WasmStr {
-                        memory: Compiler::MEM,
-                        offset: self.data_offset,
-                        len: value.len() as u32,
-                    };
-                    self.data_offset += wasm_str.len;
-                    self.strings.insert(*token, wasm_str);
-                    self.data.active(
-                        wasm_str.memory,
-                        &ConstExpr::i32_const(wasm_str.offset as i32),
-                        value.bytes(),
-                    );
+                Expression::Call { callee: _, args } => {
+                    for arg in args {
+                        if let Expression::Literal(Literal::String { token, value }) = arg {
+                            let wasm_str = WasmStr {
+                                memory: Compiler::MEM,
+                                offset: self.data_offset,
+                                len: value.len() as u32,
+                            };
+                            self.data_offset += wasm_str.len;
+                            self.strings.insert(*token, wasm_str);
+                            self.data.active(
+                                wasm_str.memory,
+                                &ConstExpr::i32_const(wasm_str.offset as i32),
+                                value.bytes(),
+                            );
+                        }
+                    }
                 }
                 Expression::Declaration { name, ty, .. } => {
-                    let local_idx = self.locals.len();
+                    let name = name.lexeme(self.source);
                     let ty_lexeme = ty.lexeme(self.source);
                     let ty = match ty_lexeme {
                         "i32" => ValType::I32,
@@ -86,8 +82,9 @@ impl<'src> Compiler<'src> {
                         "f64" => ValType::F32,
                         _ => panic!("Unsupported type {ty_lexeme}!"), // TODO: Do not panic, proper error.
                     };
+                    let local_idx = self.locals.len();
                     let entry = (local_idx as u32, ty);
-                    self.locals.insert(*name, entry);
+                    self.locals.insert(name, entry);
                 }
                 _ => {}
             }
@@ -97,54 +94,63 @@ impl<'src> Compiler<'src> {
     fn main(&mut self, module: &parser::Module) {
         let type_index = self.types.len();
         self.types.function(vec![], vec![]);
-        let main_fn_index = 1;
+        let main_fn_index = self.imports.len() - 1;
         self.functions.function(type_index);
         let mut locals = self.locals.values().copied().collect::<Vec<_>>();
         locals.sort();
         let mut main_function = Function::new(locals.iter().map(|(_i, ty)| (1, *ty)));
-        println!("{:#?}", locals);
-        let print_fn = *self.fn_indices.get("print").expect("No print available"); // TODO: Proper errors
         for expr in &module.expressions {
             match expr {
-                Expression::Call { args, .. } => {
-                    for arg in args {
-                        if let Expression::Literal { token } = arg {
-                            let Some(was_str) = self.strings.get(token) else {
-                                continue;
-                            };
-                            main_function
-                                .instruction(&Instruction::I32Const(was_str.offset as i32));
-                            main_function.instruction(&Instruction::I32Const(was_str.len as i32));
-                            main_function.instruction(&Instruction::Call(print_fn));
-                        }
+                Expression::Call { callee, args, .. } => {
+                    let callee_name = callee.lexeme(self.source);
+                    let callee = *self
+                        .fn_indices
+                        .get(callee_name)
+                        .unwrap_or_else(|| panic!("Function '{callee_name}' not found!"));
+
+                    match callee_name {
+                        "print" => match args[..] {
+                            [Expression::Literal(Literal::String { token, .. })] => {
+                                let Some(was_str) = self.strings.get(&token) else {
+                                    panic!("Trying to print a non-existing string!");
+                                };
+                                main_function
+                                    .instruction(&Instruction::I32Const(was_str.offset as i32));
+                                main_function
+                                    .instruction(&Instruction::I32Const(was_str.len as i32));
+                                main_function.instruction(&Instruction::Call(callee));
+                            }
+                            _ => panic!("Incorrect arguments for print!"),
+                        },
+                        "print_num" => match args[..] {
+                            [Expression::Variable { name }] => {
+                                let name = name.lexeme(self.source);
+                                let Some((index, _ty)) = self.locals.get(&name) else {
+                                    panic!("Trying to get non-existent local");
+                                };
+                                main_function.instruction(&Instruction::LocalGet(*index));
+                                main_function.instruction(&Instruction::Call(callee));
+                            }
+                            [Expression::Literal(Literal::Number(value))] => {
+                                main_function.instruction(&Instruction::I32Const(value));
+                                main_function.instruction(&Instruction::Call(callee));
+                            }
+                            _ => panic!("Incorrect arguments for print_num!"),
+                        },
+                        _ => panic!("Unknown function {callee_name}"),
                     }
                 }
                 Expression::Declaration { name, value, .. } => {
+                    let name = name.lexeme(self.source);
                     let (local_idx, ty) = *self.locals.get(name).expect("Undeclared variable"); // TODO: Proper errors
                     match **value {
-                        Expression::Literal { token } => {
-                            if let TokenKind::Number = token.kind {
-                                let lexeme = token.lexeme(self.source);
-                                let const_instruction = match ty {
-                                    ValType::I32 => {
-                                        Instruction::I32Const(lexeme.parse().expect("Invalid i32"))
-                                    }
-                                    ValType::I64 => {
-                                        Instruction::I64Const(lexeme.parse().expect("Invalid i64"))
-                                    }
-                                    ValType::F32 => {
-                                        Instruction::F32Const(lexeme.parse().expect("Invalid f32"))
-                                    }
-                                    ValType::F64 => {
-                                        Instruction::F64Const(lexeme.parse().expect("Invalid f64"))
-                                    }
-                                    _ => panic!("Unsupported value!"),
-                                };
-                                main_function.instruction(&const_instruction);
-                                main_function.instruction(&Instruction::LocalSet(local_idx));
-                            } else {
-                                panic!("Unsupported value!")
-                            }
+                        Expression::Literal(Literal::Number(value)) => {
+                            let const_instruction = match ty {
+                                ValType::I32 => Instruction::I32Const(value),
+                                _ => panic!("Unsupported value!"),
+                            };
+                            main_function.instruction(&const_instruction);
+                            main_function.instruction(&Instruction::LocalSet(local_idx));
                         }
                         _ => panic!("Unsupported value!"),
                     }
@@ -161,8 +167,10 @@ impl<'src> Compiler<'src> {
     fn compile(&mut self, module: &parser::Module) -> Vec<u8> {
         let print_idx = self.import_function("js", "print", &[ValType::I32, ValType::I32], &[]);
         self.fn_indices.insert("print", print_idx);
+        let print_idx = self.import_function("js", "print_num", &[ValType::I32], &[]);
+        self.fn_indices.insert("print_num", print_idx);
         self.import_memory();
-        self.fill_strings(module);
+        self.resolve(module);
         self.main(module);
 
         let mut wasm_module = wasm_encoder::Module::new();

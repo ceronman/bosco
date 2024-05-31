@@ -21,10 +21,16 @@ pub enum Expression {
         ty: Token,
         value: Box<Expression>, // TODO: Support optional values
     },
-    Literal {
-        // TODO: Support proper types here
-        token: Token,
+    Literal(Literal),
+    Variable {
+        name: Token,
     },
+}
+
+#[derive(Debug)]
+pub enum Literal {
+    Number(i32),
+    String { token: Token, value: String },
 }
 
 #[derive(Debug)]
@@ -44,7 +50,14 @@ impl Error for ParseError {}
 
 type Result<T> = std::result::Result<T, ParseError>;
 
+impl Token {
+    pub fn lexeme(self, source: &str) -> &str {
+        &source[self.start..self.end]
+    }
+}
+
 struct Parser<'src> {
+    source: &'src str,
     token: Token,
     lexer: Lexer<'src>,
 }
@@ -53,6 +66,7 @@ impl<'src> Parser<'src> {
     fn new(source: &'src str) -> Self {
         let mut lexer = Lexer::new(source);
         Parser {
+            source,
             token: lexer.skip_ws(),
             lexer,
         }
@@ -72,8 +86,11 @@ impl<'src> Parser<'src> {
     fn expression(&mut self) -> Result<Expression> {
         match self.token.kind {
             TokenKind::Str | TokenKind::Number => self.literal(),
-            TokenKind::Identifier => self.call(),
             TokenKind::Let => self.declaration(),
+            TokenKind::Identifier => match self.peek().kind {
+                TokenKind::LParen => self.call(),
+                _ => self.variable(),
+            },
             other_kind => Err(ParseError {
                 msg: format!("Expected expression, got {:?}", other_kind),
                 start: self.token.start,
@@ -85,13 +102,29 @@ impl<'src> Parser<'src> {
     fn literal(&mut self) -> Result<Expression> {
         let token = self.eat();
         match token.kind {
-            TokenKind::Str | TokenKind::Number => Ok(Expression::Literal { token }),
+            TokenKind::Str => {
+                let value = self.source[(token.start + 1)..(token.end - 1)].to_string();
+                Ok(Expression::Literal(Literal::String { token, value }))
+            }
+            TokenKind::Number => {
+                let value = token.lexeme(self.source);
+                let value: i32 = value.parse().map_err(|e| ParseError {
+                    msg: format!("Unable to parse number {value}: {e}"),
+                    start: token.start,
+                    end: token.end,
+                })?;
+                Ok(Expression::Literal(Literal::Number(value)))
+            }
             _ => Err(ParseError {
                 msg: format!("Expected literal, got {:?}", token.kind),
                 start: token.start,
                 end: token.end,
             }),
         }
+    }
+
+    fn variable(&mut self) -> Result<Expression> {
+        Ok(Expression::Variable { name: self.eat() })
     }
 
     fn call(&mut self) -> Result<Expression> {
@@ -119,7 +152,7 @@ impl<'src> Parser<'src> {
     }
 
     fn maybe_eol(&mut self) {
-        while let TokenKind::Eol = self.peek().kind {
+        while let TokenKind::Eol = self.token.kind {
             self.eat();
         }
     }
@@ -131,11 +164,11 @@ impl<'src> Parser<'src> {
     }
 
     fn peek(&self) -> Token {
-        self.token
+        self.lexer.clone().skip_ws()
     }
 
     fn expect(&mut self, token_kind: TokenKind) -> Result<Token> {
-        let token = self.peek();
+        let token = self.token;
         if token.kind == token_kind {
             self.token = self.lexer.skip_ws();
             return Ok(token);

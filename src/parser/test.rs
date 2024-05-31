@@ -1,5 +1,5 @@
 use crate::lexer::Token;
-use crate::parser::{parse, Expression, Module};
+use crate::parser::{parse, Expression, Literal, Module};
 
 trait SExpr {
     fn s_expr(&self, src: &str) -> String;
@@ -29,9 +29,19 @@ impl SExpr for Expression {
                     name.s_expr(src),
                     ty.s_expr(&src),
                     value.s_expr(src)
-                )
+                ) // TODO Inline formatting?
             }
-            Expression::Literal { token } => token.s_expr(src),
+            Expression::Literal(literal) => literal.s_expr(src),
+            Expression::Variable { name } => format!("{}", name.s_expr(src)),
+        }
+    }
+}
+
+impl SExpr for Literal {
+    fn s_expr(&self, src: &str) -> String {
+        match self {
+            Literal::Number(value) => format!("{value}"),
+            Literal::String { value, .. } => format!("\"{value}\""),
         }
     }
 }
@@ -79,4 +89,16 @@ fn test_let_declaration() {
     "#,
     );
     assert_eq!(s, "(module ((let a i32 1)))");
+}
+
+#[test]
+fn test_call_expression() {
+    let s = s_expr(
+        r#"
+        let a i32 = 1
+        print(a)
+    "#,
+    );
+    println!("{s}");
+    assert_eq!(s, "(module ((let a i32 1) (call print (a))))");
 }
