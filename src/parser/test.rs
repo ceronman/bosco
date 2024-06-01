@@ -1,5 +1,6 @@
+use crate::ast::{Expression, Literal, Module, Statement};
 use crate::lexer::Token;
-use crate::parser::{parse, Expression, Literal, Module};
+use crate::parser::parse;
 
 trait SExpr {
     fn s_expr(&self, src: &str) -> String;
@@ -7,7 +8,7 @@ trait SExpr {
 
 impl SExpr for Module {
     fn s_expr(&self, src: &str) -> String {
-        format!("(module {})", self.expressions.s_expr(src))
+        format!("(module {})", self.statements.s_expr(src))
     }
 }
 
@@ -17,20 +18,27 @@ impl SExpr for Token {
     }
 }
 
-impl SExpr for Expression {
+impl SExpr for Statement {
     fn s_expr(&self, src: &str) -> String {
         match self {
-            Expression::Call { callee, args } => {
+            Statement::Call { callee, args } => {
                 format!("(call {} {})", callee.s_expr(src), args.s_expr(src))
             }
-            Expression::Declaration { name, ty, value } => {
+            Statement::Declaration { name, ty, value } => {
                 format!(
                     "(let {} {} {})",
                     name.s_expr(src),
                     ty.s_expr(&src),
                     value.s_expr(src)
-                ) // TODO Inline formatting?
+                )
             }
+        }
+    }
+}
+
+impl SExpr for Expression {
+    fn s_expr(&self, src: &str) -> String {
+        match self {
             Expression::Literal(literal) => literal.s_expr(src),
             Expression::Variable { name } => format!("{}", name.s_expr(src)),
         }
@@ -38,7 +46,7 @@ impl SExpr for Expression {
 }
 
 impl SExpr for Literal {
-    fn s_expr(&self, src: &str) -> String {
+    fn s_expr(&self, _src: &str) -> String {
         match self {
             Literal::Number(value) => format!("{value}"),
             Literal::String { value, .. } => format!("\"{value}\""),
@@ -46,7 +54,7 @@ impl SExpr for Literal {
     }
 }
 
-impl SExpr for Vec<Expression> {
+impl<T: SExpr> SExpr for Vec<T> {
     fn s_expr(&self, src: &str) -> String {
         format!(
             "({})",

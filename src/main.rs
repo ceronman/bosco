@@ -1,5 +1,6 @@
 use crate::compiler::compile;
 
+mod ast;
 mod compiler;
 mod lexer;
 mod parser;

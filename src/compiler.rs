@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
+use crate::ast::{Expression, Literal, Module, Statement};
 use wasm_encoder::{
     CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection, Function,
     FunctionSection, ImportSection, Instruction, MemoryType, TypeSection, ValType,
 };
 
 use crate::lexer::Token;
-use crate::parser;
-use crate::parser::{parse, Expression, Literal, ParseError};
+use crate::parser::{parse, ParseError};
 
 mod test;
 
@@ -51,10 +51,10 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn resolve(&mut self, module: &parser::Module) {
-        for expr in &module.expressions {
-            match expr {
-                Expression::Call { callee: _, args } => {
+    fn resolve(&mut self, module: &Module) {
+        for statements in &module.statements {
+            match statements {
+                Statement::Call { callee: _, args } => {
                     for arg in args {
                         if let Expression::Literal(Literal::String { token, value }) = arg {
                             let wasm_str = WasmStr {
@@ -72,7 +72,7 @@ impl<'src> Compiler<'src> {
                         }
                     }
                 }
-                Expression::Declaration { name, ty, .. } => {
+                Statement::Declaration { name, ty, .. } => {
                     let name = name.lexeme(self.source);
                     let ty_lexeme = ty.lexeme(self.source);
                     let ty = match ty_lexeme {
@@ -86,12 +86,11 @@ impl<'src> Compiler<'src> {
                     let entry = (local_idx as u32, ty);
                     self.locals.insert(name, entry);
                 }
-                _ => {}
             }
         }
     }
 
-    fn main(&mut self, module: &parser::Module) {
+    fn main(&mut self, module: &Module) {
         let type_index = self.types.len();
         self.types.function(vec![], vec![]);
         let main_fn_index = self.imports.len() - 1;
@@ -99,9 +98,9 @@ impl<'src> Compiler<'src> {
         let mut locals = self.locals.values().copied().collect::<Vec<_>>();
         locals.sort();
         let mut main_function = Function::new(locals.iter().map(|(_i, ty)| (1, *ty)));
-        for expr in &module.expressions {
-            match expr {
-                Expression::Call { callee, args, .. } => {
+        for stmt in &module.statements {
+            match stmt {
+                Statement::Call { callee, args, .. } => {
                     let callee_name = callee.lexeme(self.source);
                     let callee = *self
                         .fn_indices
@@ -140,10 +139,10 @@ impl<'src> Compiler<'src> {
                         _ => panic!("Unknown function {callee_name}"),
                     }
                 }
-                Expression::Declaration { name, value, .. } => {
+                Statement::Declaration { name, value, .. } => {
                     let name = name.lexeme(self.source);
                     let (local_idx, ty) = *self.locals.get(name).expect("Undeclared variable"); // TODO: Proper errors
-                    match **value {
+                    match *value {
                         Expression::Literal(Literal::Number(value)) => {
                             let const_instruction = match ty {
                                 ValType::I32 => Instruction::I32Const(value),
@@ -155,7 +154,6 @@ impl<'src> Compiler<'src> {
                         _ => panic!("Unsupported value!"),
                     }
                 }
-                _ => {}
             }
         }
         main_function.instruction(&Instruction::End);
@@ -164,7 +162,7 @@ impl<'src> Compiler<'src> {
             .export("hello", ExportKind::Func, main_fn_index);
     }
 
-    fn compile(&mut self, module: &parser::Module) -> Vec<u8> {
+    fn compile(&mut self, module: &Module) -> Vec<u8> {
         let print_idx = self.import_function("js", "print", &[ValType::I32, ValType::I32], &[]);
         self.fn_indices.insert("print", print_idx);
         let print_idx = self.import_function("js", "print_num", &[ValType::I32], &[]);
