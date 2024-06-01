@@ -24,13 +24,14 @@ impl SExpr for Statement {
             Statement::Call { callee, args } => {
                 format!("(call {} {})", callee.s_expr(src), args.s_expr(src))
             }
-            Statement::Declaration { name, ty, value } => {
-                format!(
-                    "(let {} {} {})",
-                    name.s_expr(src),
-                    ty.s_expr(&src),
-                    value.s_expr(src)
-                )
+            Statement::Declaration { name, ty, value } => format!(
+                "(let {} {} {})",
+                name.s_expr(src),
+                ty.s_expr(&src),
+                value.s_expr(src)
+            ),
+            Statement::Assignment { name, value } => {
+                format!("(= {} {})", name.s_expr(src), value.s_expr(src))
             }
         }
     }
@@ -109,4 +110,16 @@ fn test_call_expression() {
     );
     println!("{s}");
     assert_eq!(s, "(module ((let a i32 1) (call print (a))))");
+}
+
+#[test]
+fn test_assignment() {
+    let s = s_expr(
+        r#"
+        let a i32 = 1
+        a = 256
+    "#,
+    );
+    println!("{s}");
+    assert_eq!(s, "(module ((let a i32 1) (= a 256)))");
 }

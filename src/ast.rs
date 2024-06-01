@@ -16,6 +16,10 @@ pub enum Statement {
         ty: Token,
         value: Expression, // TODO: Support optional values
     },
+    Assignment {
+        name: Token,
+        value: Expression,
+    },
 }
 
 #[derive(Debug)]

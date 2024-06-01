@@ -59,12 +59,12 @@ impl<'src> Parser<'src> {
     fn statement(&mut self) -> Result<Statement> {
         match self.token.kind {
             TokenKind::Let => self.declaration(),
-            TokenKind::Identifier => self.call(),
-            other_kind => Err(ParseError {
-                msg: format!("Expected statement, got {:?}", other_kind),
-                start: self.token.start,
-                end: self.token.end,
-            }),
+            TokenKind::Identifier => match self.peek().kind {
+                TokenKind::LParen => self.call(),
+                TokenKind::Equals => self.assignment(),
+                kind => self.error(format!("Unexpected token when parsing statement {kind:?}")),
+            },
+            other_kind => self.error(format!("Expected statement, got {other_kind:?}")),
         }
     }
 
@@ -72,11 +72,7 @@ impl<'src> Parser<'src> {
         match self.token.kind {
             TokenKind::Str | TokenKind::Number => self.literal(),
             TokenKind::Identifier => self.variable(),
-            other_kind => Err(ParseError {
-                msg: format!("Expected expression, got {:?}", other_kind),
-                start: self.token.start,
-                end: self.token.end,
-            }),
+            other_kind => self.error(format!("Expected expression, got {other_kind:?}")),
         }
     }
 
@@ -96,11 +92,7 @@ impl<'src> Parser<'src> {
                 })?;
                 Ok(Expression::Literal(Literal::Number(value)))
             }
-            _ => Err(ParseError {
-                msg: format!("Expected literal, got {:?}", token.kind),
-                start: token.start,
-                end: token.end,
-            }),
+            _ => self.error(format!("Expected literal, got {:?}", token.kind)),
         }
     }
 
@@ -109,14 +101,21 @@ impl<'src> Parser<'src> {
     }
 
     fn call(&mut self) -> Result<Statement> {
-        let identifier = self.expect(TokenKind::Identifier)?;
+        let callee = self.expect(TokenKind::Identifier)?;
         self.expect(TokenKind::LParen)?;
         let arg = self.expression()?;
         self.expect(TokenKind::RParen)?;
         Ok(Statement::Call {
-            callee: identifier,
+            callee,
             args: vec![arg],
         })
+    }
+
+    fn assignment(&mut self) -> Result<Statement> {
+        let name = self.expect(TokenKind::Identifier)?;
+        self.expect(TokenKind::Equals)?;
+        let value = self.expression()?;
+        Ok(Statement::Assignment { name, value })
     }
 
     fn declaration(&mut self) -> Result<Statement> {
@@ -134,6 +133,10 @@ impl<'src> Parser<'src> {
         }
     }
 
+    fn peek(&self) -> Token {
+        self.lexer.clone().skip_ws()
+    }
+
     fn eat(&mut self) -> Token {
         let prev = self.token;
         self.token = self.lexer.skip_ws();
@@ -147,10 +150,17 @@ impl<'src> Parser<'src> {
             return Ok(token);
         }
 
+        self.error(format!(
+            "Expected token {:?}, got {:?}",
+            token_kind, token.kind
+        ))
+    }
+
+    fn error<T>(&self, msg: String) -> Result<T> {
         Err(ParseError {
-            msg: format!("Expected token {:?}, got {:?}", token_kind, token.kind),
-            start: token.start,
-            end: token.end,
+            msg,
+            start: self.token.start,
+            end: self.token.end,
         })
     }
 }

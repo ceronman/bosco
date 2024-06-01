@@ -86,6 +86,8 @@ impl<'src> Compiler<'src> {
                     let entry = (local_idx as u32, ty);
                     self.locals.insert(name, entry);
                 }
+
+                _ => {}
             }
         }
     }
@@ -139,7 +141,8 @@ impl<'src> Compiler<'src> {
                         _ => panic!("Unknown function {callee_name}"),
                     }
                 }
-                Statement::Declaration { name, value, .. } => {
+                Statement::Declaration { name, value, .. }
+                | Statement::Assignment { name, value } => {
                     let name = name.lexeme(self.source);
                     let (local_idx, ty) = *self.locals.get(name).expect("Undeclared variable"); // TODO: Proper errors
                     match *value {

@@ -11,6 +11,8 @@ fn hello_world_compile() {
         print("Bosco!")
         print_num(256)
         print_num(a)
+        a = 64
+        print_num(a)
     "#;
     let module = parse(src).unwrap();
     println!("Module: \n {module:#?}");
