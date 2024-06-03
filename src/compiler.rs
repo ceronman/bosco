@@ -6,7 +6,7 @@ use wasm_encoder::{
     FunctionSection, ImportSection, Instruction, MemoryType, TypeSection, ValType,
 };
 
-use crate::lexer::Token;
+use crate::lexer::{Token, TokenKind};
 use crate::parser::{parse, ParseError};
 
 mod test;
@@ -123,39 +123,22 @@ impl<'src> Compiler<'src> {
                             }
                             _ => panic!("Incorrect arguments for print!"),
                         },
-                        "print_num" => match args[..] {
-                            [Expression::Variable { name }] => {
-                                let name = name.lexeme(self.source);
-                                let Some((index, _ty)) = self.locals.get(&name) else {
-                                    panic!("Trying to get non-existent local");
-                                };
-                                main_function.instruction(&Instruction::LocalGet(*index));
-                                main_function.instruction(&Instruction::Call(callee));
+                        "print_num" => {
+                            if args.len() != 1 {
+                                panic!("Incorrect number of arguments for print_num!")
                             }
-                            [Expression::Literal(Literal::Number(value))] => {
-                                main_function.instruction(&Instruction::I32Const(value));
-                                main_function.instruction(&Instruction::Call(callee));
-                            }
-                            _ => panic!("Incorrect arguments for print_num!"),
-                        },
+                            self.expression(&mut main_function, &args[0]);
+                            main_function.instruction(&Instruction::Call(callee));
+                        }
                         _ => panic!("Unknown function {callee_name}"),
                     }
                 }
                 Statement::Declaration { name, value, .. }
                 | Statement::Assignment { name, value } => {
                     let name = name.lexeme(self.source);
-                    let (local_idx, ty) = *self.locals.get(name).expect("Undeclared variable"); // TODO: Proper errors
-                    match *value {
-                        Expression::Literal(Literal::Number(value)) => {
-                            let const_instruction = match ty {
-                                ValType::I32 => Instruction::I32Const(value),
-                                _ => panic!("Unsupported value!"),
-                            };
-                            main_function.instruction(&const_instruction);
-                            main_function.instruction(&Instruction::LocalSet(local_idx));
-                        }
-                        _ => panic!("Unsupported value!"),
-                    }
+                    let (local_idx, _ty) = *self.locals.get(name).expect("Undeclared variable"); // TODO: Proper errors
+                    self.expression(&mut main_function, value);
+                    main_function.instruction(&Instruction::LocalSet(local_idx));
                 }
             }
         }
@@ -163,6 +146,36 @@ impl<'src> Compiler<'src> {
         self.codes.function(&main_function);
         self.exports
             .export("hello", ExportKind::Func, main_fn_index);
+    }
+
+    fn expression(&mut self, func: &mut Function, expr: &Expression) {
+        match expr {
+            Expression::Literal(Literal::Number(value)) => {
+                func.instruction(&Instruction::I32Const(*value));
+            }
+            Expression::Literal(Literal::String { .. }) => {
+                todo!("Literal strings are not implemented")
+            }
+            Expression::Binary {
+                left,
+                right,
+                operator,
+            } => {
+                self.expression(func, left);
+                self.expression(func, right);
+                match operator.kind {
+                    TokenKind::Plus => func.instruction(&Instruction::I32Add),
+                    _ => panic!("Unsupported operant {:?}", operator.kind),
+                };
+            }
+            Expression::Variable { name } => {
+                let name = name.lexeme(self.source);
+                let Some((index, _ty)) = self.locals.get(&name) else {
+                    panic!("Trying to get non-existent local");
+                };
+                func.instruction(&Instruction::LocalGet(*index));
+            }
+        }
     }
 
     fn compile(&mut self, module: &Module) -> Vec<u8> {

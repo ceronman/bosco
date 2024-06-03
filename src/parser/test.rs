@@ -42,6 +42,16 @@ impl SExpr for Expression {
         match self {
             Expression::Literal(literal) => literal.s_expr(src),
             Expression::Variable { name } => format!("{}", name.s_expr(src)),
+            Expression::Binary {
+                left,
+                right,
+                operator,
+            } => format!(
+                "({} {} {})",
+                operator.s_expr(src),
+                left.s_expr(src),
+                right.s_expr(src)
+            ),
         }
     }
 }
@@ -122,4 +132,27 @@ fn test_assignment() {
     );
     println!("{s}");
     assert_eq!(s, "(module ((let a i32 1) (= a 256)))");
+}
+
+#[test]
+fn test_assignment_binary_expression() {
+    let s = s_expr(
+        r#"
+        let a i32 = 4
+        let b i32 = a + 10
+    "#,
+    );
+    println!("{s}");
+    assert_eq!(s, "(module ((let a i32 4) (let b i32 (+ a 10))))");
+}
+
+#[test]
+fn test_chained_binary() {
+    let s = s_expr(
+        r#"
+        a = b + c + d
+    "#,
+    );
+    println!("{s}");
+    assert_eq!(s, "(module ((= a (+ b (+ c d)))))");
 }

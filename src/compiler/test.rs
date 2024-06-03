@@ -13,6 +13,8 @@ fn hello_world_compile() {
         print_num(a)
         a = 64
         print_num(a)
+        let b i32 = a + 100
+        print_num(b)
     "#;
     let module = parse(src).unwrap();
     println!("Module: \n {module:#?}");

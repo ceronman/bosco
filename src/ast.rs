@@ -25,7 +25,14 @@ pub enum Statement {
 #[derive(Debug)]
 pub enum Expression {
     Literal(Literal),
-    Variable { name: Token },
+    Variable {
+        name: Token,
+    },
+    Binary {
+        left: Box<Expression>,
+        right: Box<Expression>,
+        operator: Token,
+    },
 }
 
 #[derive(Debug)]

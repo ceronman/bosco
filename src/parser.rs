@@ -71,7 +71,10 @@ impl<'src> Parser<'src> {
     fn expression(&mut self) -> Result<Expression> {
         match self.token.kind {
             TokenKind::Str | TokenKind::Number => self.literal(),
-            TokenKind::Identifier => self.variable(),
+            TokenKind::Identifier => match self.peek().kind {
+                TokenKind::Plus => self.binary(),
+                _ => self.variable(),
+            },
             other_kind => self.error(format!("Expected expression, got {other_kind:?}")),
         }
     }
@@ -100,6 +103,18 @@ impl<'src> Parser<'src> {
         Ok(Expression::Variable { name: self.eat() })
     }
 
+    fn binary(&mut self) -> Result<Expression> {
+        let left = self.expect(TokenKind::Identifier)?;
+        let left = Expression::Variable { name: left };
+        let operator = self.expect(TokenKind::Plus)?;
+        let right = self.expression()?;
+        Ok(Expression::Binary {
+            left: Box::new(left),
+            right: Box::new(right),
+            operator,
+        })
+    }
+
     fn call(&mut self) -> Result<Statement> {
         let callee = self.expect(TokenKind::Identifier)?;
         self.expect(TokenKind::LParen)?;
@@ -121,7 +136,7 @@ impl<'src> Parser<'src> {
     fn declaration(&mut self) -> Result<Statement> {
         self.expect(TokenKind::Let)?;
         let name = self.expect(TokenKind::Identifier)?;
-        let ty = self.expect(TokenKind::Identifier)?;
+        let ty = self.expect(TokenKind::Identifier)?; // TODO: Better error message one missing ty
         self.expect(TokenKind::Equals)?;
         let value = self.expression()?;
         Ok(Statement::Declaration { name, ty, value })
