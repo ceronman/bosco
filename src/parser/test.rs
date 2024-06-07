@@ -1,3 +1,4 @@
+use std::str::Chars;
 use crate::ast::{Expression, Literal, Module, Statement};
 use crate::lexer::Token;
 use crate::parser::parse;
@@ -68,7 +69,7 @@ impl SExpr for Literal {
 impl<T: SExpr> SExpr for Vec<T> {
     fn s_expr(&self, src: &str) -> String {
         format!(
-            "({})",
+            "{}",
             self.iter()
                 .map(|e| e.s_expr(src))
                 .collect::<Vec<String>>()
@@ -82,77 +83,130 @@ fn s_expr(src: &str) -> String {
     program.s_expr(src)
 }
 
+#[derive(Eq, PartialEq, Debug)]
+enum SExpression {
+    Symbol(String),
+    Expr(Vec<SExpression>)
+}
+
+fn parse_sexpr(code: &str) -> SExpression {
+    parse_chars(&mut code.chars())
+}
+
+fn parse_chars(expr: &mut Chars<'_>) -> SExpression {
+    match expr.skip_while(|c| c.is_whitespace()).next() {
+        Some('(') => {
+            let mut elements = Vec::new();
+            loop {
+                if let Some(')') = expr.clone().next() {
+                    break;
+                }
+                let e = parse_chars(expr);
+                elements.push(e);
+            }
+            match expr.next() {
+                Some(')') => (),
+                _ => panic!("Missing closing s-expression")
+            }
+            SExpression::Expr(elements)
+        }
+        Some(char) => {
+            let mut symbol = String::new();
+            symbol.push(char);
+            loop {
+                match expr.clone().next() {
+                    None => break,
+                    Some(')') | Some('(') => break,
+                    Some(c) if c.is_whitespace() => break,
+                    Some(c) => {
+                        symbol.push(c);
+                        expr.next();
+                    }
+                }
+            }
+            SExpression::Symbol(symbol)
+        }
+        None => panic!("Unexpected end of input in sexpr")
+    }
+}
+
+macro_rules! test_parser {
+    ($code:expr , $($t:tt)*) => {
+        let actual = s_expr($code);
+        let actual = parse_sexpr(&actual);
+        let expected = stringify!($($t)*);
+        let expected = parse_sexpr(expected);
+        assert_eq!(expected, actual);
+    }
+}
+
 #[test]
 fn test_simple_call() {
-    let s = s_expr("print(\"hello\")");
-    assert_eq!(s, "(module ((call print (\"hello\"))))");
+    test_parser! {
+        "print(\"hello\")",
+        (module (call print "hello"))
+    }
 }
 
 #[test]
 fn test_simple_call_with_ws() {
-    let s = s_expr(
+    test_parser! {
         r#"
-
-        print("Hello world")
-
-    "#,
-    );
-    assert_eq!(s, "(module ((call print (\"Hello world\"))))");
+            print("Hello world")
+        "#,
+        (module (call print "Hello world"))
+    }
 }
 
 #[test]
 fn test_let_declaration() {
-    let s = s_expr(
-        r#"
-        let a i32 = 1
-    "#,
-    );
-    assert_eq!(s, "(module ((let a i32 1)))");
+    test_parser! {
+        "let a i32 = 1",
+        (module (let a i32 1))
+    }
 }
 
 #[test]
 fn test_call_expression() {
-    let s = s_expr(
+    test_parser! {
         r#"
-        let a i32 = 1
-        print(a)
-    "#,
-    );
-    println!("{s}");
-    assert_eq!(s, "(module ((let a i32 1) (call print (a))))");
+            let a i32 = 1
+            print(a)
+        "#,
+        (module (let a i32 1) (call print a))
+    }
 }
 
 #[test]
 fn test_assignment() {
-    let s = s_expr(
+    test_parser! {
         r#"
-        let a i32 = 1
-        a = 256
-    "#,
-    );
-    println!("{s}");
-    assert_eq!(s, "(module ((let a i32 1) (= a 256)))");
+            let a i32 = 1
+            a = 256
+        "#,
+        (module (let a i32 1) (= a 256))
+    }
 }
 
 #[test]
 fn test_assignment_binary_expression() {
-    let s = s_expr(
+    test_parser! {
         r#"
-        let a i32 = 4
-        let b i32 = a + 10
-    "#,
-    );
-    println!("{s}");
-    assert_eq!(s, "(module ((let a i32 4) (let b i32 (+ a 10))))");
+            let a i32 = 4
+            let b i32 = a + 10
+        "#,
+        (module
+            (let a i32 4)
+            (let b i32 (+ a 10)))
+    }
 }
 
 #[test]
-fn test_chained_binary() {
-    let s = s_expr(
-        r#"
-        a = b + c + d
-    "#,
-    );
-    println!("{s}");
-    assert_eq!(s, "(module ((= a (+ b (+ c d)))))");
+fn test_binary_chain() {
+    test_parser! {
+        "a = b + c + d",
+        (module
+            (= a (+ b (+ c d)))
+        )
+    }
 }
