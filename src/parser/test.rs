@@ -1,7 +1,8 @@
-use std::str::Chars;
 use crate::ast::{Expression, Literal, Module, Statement};
 use crate::lexer::Token;
 use crate::parser::parse;
+use std::fmt::{Debug, Formatter};
+use std::str::Chars;
 
 trait SExpr {
     fn s_expr(&self, src: &str) -> String;
@@ -83,10 +84,28 @@ fn s_expr(src: &str) -> String {
     program.s_expr(src)
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq)]
 enum SExpression {
     Symbol(String),
-    Expr(Vec<SExpression>)
+    Expr(Vec<SExpression>),
+}
+
+impl Debug for SExpression {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SExpression::Symbol(s) => write!(f, "{s}"),
+            SExpression::Expr(expressions) => {
+                write!(f, "(")?;
+                for (i, e) in expressions.iter().enumerate() {
+                    write!(f, "{e:?}")?;
+                    if i < expressions.len() - 1 {
+                        write!(f, " ")?;
+                    }
+                }
+                write!(f, ")")
+            }
+        }
+    }
 }
 
 fn parse_sexpr(code: &str) -> SExpression {
@@ -106,7 +125,7 @@ fn parse_chars(expr: &mut Chars<'_>) -> SExpression {
             }
             match expr.next() {
                 Some(')') => (),
-                _ => panic!("Missing closing s-expression")
+                _ => panic!("Missing closing s-expression"),
             }
             SExpression::Expr(elements)
         }
@@ -126,7 +145,7 @@ fn parse_chars(expr: &mut Chars<'_>) -> SExpression {
             }
             SExpression::Symbol(symbol)
         }
-        None => panic!("Unexpected end of input in sexpr")
+        None => panic!("Unexpected end of input in sexpr"),
     }
 }
 
@@ -202,11 +221,21 @@ fn test_assignment_binary_expression() {
 }
 
 #[test]
-fn test_binary_chain() {
+fn test_associativity() {
     test_parser! {
-        "a = b + c + d",
+        "x = a + b + c",
         (module
-            (= a (+ b (+ c d)))
+            (= x (+ (+ a b) c))
+        )
+    }
+}
+
+#[test]
+fn test_precedence() {
+    test_parser! {
+        "x = a + b * c + d",
+        (module
+            (= x (+ (+ a (* b c)) d))
         )
     }
 }

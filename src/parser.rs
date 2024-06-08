@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod test;
 
+use crate::ast::Expression::Binary;
 use crate::ast::{Expression, Literal, Module, Statement};
 use crate::lexer::{Lexer, Token, TokenKind};
 use std::error::Error;
@@ -68,15 +69,45 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn expression(&mut self) -> Result<Expression> {
+    fn expression_precedence(&mut self, min_precedence: u8) -> Result<Expression> {
+        let mut left = self.expression_atom()?;
+        loop {
+            let operator = self.token;
+            let Some(precedence) = self.binary_precedence(operator.kind) else {
+                break;
+            };
+            if precedence < min_precedence {
+                break;
+            }
+            self.eat();
+            let right = self.expression_precedence(precedence + 1)?;
+            left = Binary {
+                left: Box::new(left),
+                right: Box::new(right),
+                operator,
+            };
+        }
+        Ok(left)
+    }
+
+    fn binary_precedence(&self, operator: TokenKind) -> Option<u8> {
+        match operator {
+            TokenKind::Plus => Some(2),
+            TokenKind::Star => Some(4),
+            _ => None,
+        }
+    }
+
+    fn expression_atom(&mut self) -> Result<Expression> {
         match self.token.kind {
             TokenKind::Str | TokenKind::Number => self.literal(),
-            TokenKind::Identifier => match self.peek().kind {
-                TokenKind::Plus => self.binary(),
-                _ => self.variable(),
-            },
+            TokenKind::Identifier => self.variable(),
             other_kind => self.error(format!("Expected expression, got {other_kind:?}")),
         }
+    }
+
+    fn expression(&mut self) -> Result<Expression> {
+        self.expression_precedence(0)
     }
 
     fn literal(&mut self) -> Result<Expression> {
@@ -101,18 +132,6 @@ impl<'src> Parser<'src> {
 
     fn variable(&mut self) -> Result<Expression> {
         Ok(Expression::Variable { name: self.eat() })
-    }
-
-    fn binary(&mut self) -> Result<Expression> {
-        let left = self.expect(TokenKind::Identifier)?;
-        let left = Expression::Variable { name: left };
-        let operator = self.expect(TokenKind::Plus)?;
-        let right = self.expression()?;
-        Ok(Expression::Binary {
-            left: Box::new(left),
-            right: Box::new(right),
-            operator,
-        })
     }
 
     fn call(&mut self) -> Result<Statement> {

@@ -15,6 +15,8 @@ fn hello_world_compile() {
         print_num(a)
         let b i32 = a + 100
         print_num(b)
+        let c i32 = 1 + 2 * 3 + 4
+        print_num(c)
     "#;
     let module = parse(src).unwrap();
     println!("Module: \n {module:#?}");

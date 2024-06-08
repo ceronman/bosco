@@ -165,6 +165,7 @@ impl<'src> Compiler<'src> {
                 self.expression(func, right);
                 match operator.kind {
                     TokenKind::Plus => func.instruction(&Instruction::I32Add),
+                    TokenKind::Star => func.instruction(&Instruction::I32Mul),
                     _ => panic!("Unsupported operant {:?}", operator.kind),
                 };
             }
