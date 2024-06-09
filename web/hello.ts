@@ -19,11 +19,9 @@ const importObject = {
 };
 
 // @ts-ignore
-let file = await Deno.readFile("hello.wasm");
+let file = await Deno.readFile(Deno.args[0]);
 let module = new WebAssembly.Module(file);
 let instance = new WebAssembly.Instance(module, importObject);
-
-console.log("Starting...")
 
 // @ts-ignore
 instance.exports.hello();

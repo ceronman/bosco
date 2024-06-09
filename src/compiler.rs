@@ -9,6 +9,7 @@ use wasm_encoder::{
 use crate::lexer::{Token, TokenKind};
 use crate::parser::{parse, ParseError};
 
+#[cfg(test)]
 mod test;
 
 #[derive(Clone, Copy)]
