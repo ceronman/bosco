@@ -60,6 +60,7 @@ impl<'src> Parser<'src> {
     fn statement(&mut self) -> Result<Statement> {
         match self.token.kind {
             TokenKind::Let => self.declaration(),
+            TokenKind::If => self.if_statement(),
             TokenKind::Identifier => match self.peek().kind {
                 TokenKind::LParen => self.call(),
                 TokenKind::Equals => self.assignment(),
@@ -76,8 +77,8 @@ impl<'src> Parser<'src> {
                 let inner = self.expression()?;
                 self.expect(TokenKind::RParen)?;
                 inner
-            },
-            _ => self.expression_atom()?
+            }
+            _ => self.expression_atom()?,
         };
 
         loop {
@@ -171,6 +172,36 @@ impl<'src> Parser<'src> {
         self.expect(TokenKind::Equals)?;
         let value = self.expression()?;
         Ok(Statement::Declaration { name, ty, value })
+    }
+
+    fn if_statement(&mut self) -> Result<Statement> {
+        self.expect(TokenKind::If)?;
+        let condition = self.expression()?;
+        self.expect(TokenKind::LBrace)?;
+        self.maybe_eol();
+        let mut then_block = Vec::new();
+        while self.token.kind != TokenKind::RBrace {
+            then_block.push(self.statement()?);
+            self.maybe_eol();
+        }
+        self.expect(TokenKind::RBrace)?;
+        self.maybe_eol();
+        let mut else_block = Vec::new();
+        if self.token.kind == TokenKind::Else {
+            self.eat();
+            self.expect(TokenKind::LBrace)?;
+            self.maybe_eol();
+            while self.token.kind != TokenKind::RBrace {
+                else_block.push(self.statement()?);
+                self.maybe_eol();
+            }
+            self.expect(TokenKind::RBrace)?;
+        }
+        Ok(Statement::If {
+            condition,
+            then_block,
+            else_block,
+        })
     }
 
     fn maybe_eol(&mut self) {

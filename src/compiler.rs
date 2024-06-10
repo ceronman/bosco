@@ -141,6 +141,8 @@ impl<'src> Compiler<'src> {
                     self.expression(&mut main_function, value);
                     main_function.instruction(&Instruction::LocalSet(local_idx));
                 }
+
+                _ => panic!("Unresolved statement"),
             }
         }
         main_function.instruction(&Instruction::End);

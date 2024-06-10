@@ -20,6 +20,11 @@ pub enum Statement {
         name: Token,
         value: Expression,
     },
+    If {
+        condition: Expression,
+        then_block: Vec<Statement>,
+        else_block: Vec<Statement>,
+    },
 }
 
 #[derive(Debug)]

@@ -35,6 +35,19 @@ impl SExpr for Statement {
             Statement::Assignment { name, value } => {
                 format!("(= {} {})", name.s_expr(src), value.s_expr(src))
             }
+
+            Statement::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
+                format!(
+                    "(if {} ({}) ({}))",
+                    condition.s_expr(src),
+                    then_block.s_expr(src),
+                    else_block.s_expr(src)
+                )
+            }
         }
     }
 }
@@ -250,3 +263,22 @@ fn test_grouping() {
     }
 }
 
+#[test]
+fn test_if_statement() {
+    test_parser! {
+        r#"
+            if 1 + 1 {
+                let a i32 = 1
+                print("true")
+            } else {
+                print("false")
+            }
+        "#,
+        (module
+            (if (+ 1 1)
+                ((let a i32 1) (call print "true"))
+                ((call print "false"))
+            )
+        )
+    }
+}

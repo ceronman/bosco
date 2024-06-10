@@ -29,6 +29,8 @@ pub enum TokenKind {
     Str,
 
     Let,
+    If,
+    Else,
 
     LineComment,
     BlockComment,
@@ -192,6 +194,8 @@ impl<'src> Lexer<'src> {
             "true" => TokenKind::True,
             "false" => TokenKind::False,
             "let" => TokenKind::Let,
+            "if" => TokenKind::If,
+            "else" => TokenKind::Else,
             _ => TokenKind::Identifier,
         }
     }
