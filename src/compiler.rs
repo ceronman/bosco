@@ -164,9 +164,15 @@ impl<'src> Compiler<'src> {
             } => {
                 self.expression(func, left);
                 self.expression(func, right);
+
+                // TODO: Not deal with tokens here?
+                // TODO: Types!
                 match operator.kind {
                     TokenKind::Plus => func.instruction(&Instruction::I32Add),
+                    TokenKind::Minus => func.instruction(&Instruction::I32Sub),
                     TokenKind::Star => func.instruction(&Instruction::I32Mul),
+                    TokenKind::Slash => func.instruction(&Instruction::I32DivS),
+                    TokenKind::Percent => func.instruction(&Instruction::I32RemS),
                     _ => panic!("Unsupported operant {:?}", operator.kind),
                 };
             }

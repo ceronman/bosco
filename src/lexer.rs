@@ -10,6 +10,7 @@ pub enum TokenKind {
     Minus,
     Slash,
     Star,
+    Percent,
 
     Equals,
 
@@ -100,6 +101,7 @@ impl<'src> Lexer<'src> {
                 Some('*') => self.block_comment(),
                 _ => TokenKind::Slash,
             },
+            '%' => TokenKind::Percent,
             '=' => TokenKind::Equals,
             '(' => TokenKind::LParen,
             ')' => TokenKind::RParen,

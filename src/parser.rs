@@ -92,8 +92,11 @@ impl<'src> Parser<'src> {
 
     fn binary_precedence(&self, operator: TokenKind) -> Option<u8> {
         match operator {
-            TokenKind::Plus => Some(2),
-            TokenKind::Star => Some(4),
+            TokenKind::Plus => Some(1),
+            TokenKind::Minus => Some(1),
+            TokenKind::Star => Some(2),
+            TokenKind::Slash => Some(2),
+            TokenKind::Percent => Some(2),
             _ => None,
         }
     }

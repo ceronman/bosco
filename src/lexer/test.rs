@@ -30,7 +30,7 @@ fn test_lexer(code: &str, expected: Vec<TokenKind>, skip_ws: bool) {
 }
 #[test]
 fn operators() {
-    test_lexer("+ -", vec![Plus, Minus], true);
+    test_lexer("+ - / * %", vec![Plus, Minus, Slash, Star, Percent], true);
 }
 
 #[test]

@@ -83,10 +83,13 @@ fn test_expressions() {
             let a i32 = 1
             let b i32 = 2
             let c i32 = a + b * 2 + 4
+            let d i32 = a + b * c / 5 % 2
             print_num(c)
+            print_num(d)
         "#,
         r#"
             9
+            2
         "#,
     )
 }
