@@ -70,7 +70,16 @@ impl<'src> Parser<'src> {
     }
 
     fn expression_precedence(&mut self, min_precedence: u8) -> Result<Expression> {
-        let mut left = self.expression_atom()?;
+        let mut left = match self.token.kind {
+            TokenKind::LParen => {
+                self.eat();
+                let inner = self.expression()?;
+                self.expect(TokenKind::RParen)?;
+                inner
+            },
+            _ => self.expression_atom()?
+        };
+
         loop {
             let operator = self.token;
             let Some(precedence) = self.binary_precedence(operator.kind) else {

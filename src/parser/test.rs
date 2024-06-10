@@ -239,3 +239,14 @@ fn test_precedence() {
         )
     }
 }
+
+#[test]
+fn test_grouping() {
+    test_parser! {
+        "x = (a + b) * (c + d)",
+        (module
+            (= x (* (+ a b) (+ c d)))
+        )
+    }
+}
+

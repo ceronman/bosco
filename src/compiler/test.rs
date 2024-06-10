@@ -13,7 +13,6 @@ fn program_test(source: &str, expected_out: &str) {
         "test_{}.wasm",
         GLOBAL_THREAD_COUNT.fetch_add(1, Ordering::Relaxed)
     );
-    println!("Writing to {filename}");
 
     let mut f = std::fs::OpenOptions::new()
         .create(true)
@@ -83,13 +82,16 @@ fn test_expressions() {
             let a i32 = 1
             let b i32 = 2
             let c i32 = a + b * 2 + 4
-            let d i32 = a + b * c / 5 % 2
             print_num(c)
+            let d i32 = a + b * c / 5 % 2
             print_num(d)
+            let e i32 = (a + b) * (c - d)
+            print_num(e)
         "#,
         r#"
             9
             2
+            21
         "#,
     )
 }
