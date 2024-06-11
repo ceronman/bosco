@@ -130,7 +130,7 @@ fn block_comment_unterminated() {
 fn let_declaration() {
     test_lexer(
         r#" let foo = 1"#,
-        vec![Let, Identifier, Equals, Number],
+        vec![Let, Identifier, Equal, Number],
         true,
     );
 }
@@ -162,9 +162,61 @@ fn arithmetic_expressions() {
             let x = (a + b) - (a + c)
         "#,
         vec![
-            Eol, Let, Identifier, Equals, Number, Eol, Let, Identifier, Equals, Number, Eol, Let,
-            Identifier, Equals, Number, Eol, Let, Identifier, Equals, LParen, Identifier, Plus,
+            Eol, Let, Identifier, Equal, Number, Eol, Let, Identifier, Equal, Number, Eol, Let,
+            Identifier, Equal, Number, Eol, Let, Identifier, Equal, LParen, Identifier, Plus,
             Identifier, RParen, Minus, LParen, Identifier, Plus, Identifier, RParen, Eol,
+        ],
+        true,
+    );
+}
+
+#[test]
+fn boolean_expressions() {
+    test_lexer(
+        r#"
+            a > b
+            c < d
+            x >= y
+            z <= z
+            a == b
+            b != c
+            x or y
+            a and b
+        "#,
+        vec![
+            Eol,
+            Identifier,
+            Greater,
+            Identifier,
+            Eol,
+            Identifier,
+            Less,
+            Identifier,
+            Eol,
+            Identifier,
+            GreaterEqual,
+            Identifier,
+            Eol,
+            Identifier,
+            LessEqual,
+            Identifier,
+            Eol,
+            Identifier,
+            EqualEqual,
+            Identifier,
+            Eol,
+            Identifier,
+            BangEqual,
+            Identifier,
+            Eol,
+            Identifier,
+            Or,
+            Identifier,
+            Eol,
+            Identifier,
+            And,
+            Identifier,
+            Eol,
         ],
         true,
     );

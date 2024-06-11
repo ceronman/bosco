@@ -63,7 +63,7 @@ impl<'src> Parser<'src> {
             TokenKind::If => self.if_statement(),
             TokenKind::Identifier => match self.peek().kind {
                 TokenKind::LParen => self.call(),
-                TokenKind::Equals => self.assignment(),
+                TokenKind::Equal => self.assignment(),
                 kind => self.error(format!("Unexpected token when parsing statement {kind:?}")),
             },
             other_kind => self.error(format!("Expected statement, got {other_kind:?}")),
@@ -101,12 +101,14 @@ impl<'src> Parser<'src> {
     }
 
     fn binary_precedence(&self, operator: TokenKind) -> Option<u8> {
+        use TokenKind::*;
         match operator {
-            TokenKind::Plus => Some(1),
-            TokenKind::Minus => Some(1),
-            TokenKind::Star => Some(2),
-            TokenKind::Slash => Some(2),
-            TokenKind::Percent => Some(2),
+            Or => Some(1),
+            And => Some(2),
+            EqualEqual | BangEqual => Some(3),
+            Greater | GreaterEqual | Less | LessEqual => Some(4),
+            Plus | Minus => Some(5),
+            Star | Slash | Percent => Some(6),
             _ => None,
         }
     }
@@ -160,7 +162,7 @@ impl<'src> Parser<'src> {
 
     fn assignment(&mut self) -> Result<Statement> {
         let name = self.expect(TokenKind::Identifier)?;
-        self.expect(TokenKind::Equals)?;
+        self.expect(TokenKind::Equal)?;
         let value = self.expression()?;
         Ok(Statement::Assignment { name, value })
     }
@@ -169,7 +171,7 @@ impl<'src> Parser<'src> {
         self.expect(TokenKind::Let)?;
         let name = self.expect(TokenKind::Identifier)?;
         let ty = self.expect(TokenKind::Identifier)?; // TODO: Better error message one missing ty
-        self.expect(TokenKind::Equals)?;
+        self.expect(TokenKind::Equal)?;
         let value = self.expression()?;
         Ok(Statement::Declaration { name, ty, value })
     }

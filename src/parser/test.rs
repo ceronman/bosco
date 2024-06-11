@@ -282,3 +282,20 @@ fn test_if_statement() {
         )
     }
 }
+
+#[test]
+fn test_conditionals() {
+    test_parser! {
+        r#"
+            if a > 2 and b < c or 1 >= x and z == 1 {
+                print("true")
+            }
+        "#,
+        (module
+            (if (or (and (> a 2) (< b c)) (and (>= 1 x) (== z 1)))
+                ((call print "true"))
+                ()
+            )
+        )
+    }
+}

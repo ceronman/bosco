@@ -12,7 +12,18 @@ pub enum TokenKind {
     Star,
     Percent,
 
-    Equals,
+    EqualEqual,
+    BangEqual,
+    Greater,
+    GreaterEqual,
+    Less,
+    LessEqual,
+
+    Or,
+    And,
+
+    Equal,
+    Bang,
 
     LParen,
     RParen,
@@ -92,28 +103,33 @@ impl<'src> Lexer<'src> {
     fn token_kind(&mut self, c: Option<char>) -> TokenKind {
         let Some(c) = c else { return TokenKind::Eof };
 
-        match c {
-            ' ' | '\t' | '\r' => self.whitespace(),
-            '\n' => self.eol(),
-            '+' => TokenKind::Plus,
-            '-' => TokenKind::Minus,
-            '*' => TokenKind::Star,
-            '/' => match self.peek() {
-                Some('/') => self.line_comment(),
-                Some('*') => self.block_comment(),
-                _ => TokenKind::Slash,
-            },
-            '%' => TokenKind::Percent,
-            '=' => TokenKind::Equals,
-            '(' => TokenKind::LParen,
-            ')' => TokenKind::RParen,
-            '{' => TokenKind::LBrace,
-            '}' => TokenKind::RBrace,
-            '[' => TokenKind::LBracket,
-            ']' => TokenKind::RBracket,
-            '0'..='9' => self.number(),
-            '"' => self.string(),
-            c if c == '_' || c.is_alphabetic() => self.identifier(),
+        match (c, self.peek()) {
+            (' ' | '\t' | '\r', _) => self.whitespace(),
+            ('\n', _) => self.eol(),
+            ('+', _) => TokenKind::Plus,
+            ('-', _) => TokenKind::Minus,
+            ('*', _) => TokenKind::Star,
+            ('/', Some('/')) => self.line_comment(),
+            ('/', Some('*')) => self.block_comment(),
+            ('/', _) => TokenKind::Slash,
+            ('%', _) => TokenKind::Percent,
+            ('=', Some('=')) => self.eat_and(TokenKind::EqualEqual),
+            ('=', _) => TokenKind::Equal,
+            ('!', Some('=')) => self.eat_and(TokenKind::BangEqual),
+            ('!', _) => TokenKind::Bang,
+            ('>', Some('=')) => self.eat_and(TokenKind::GreaterEqual),
+            ('>', _) => TokenKind::Greater,
+            ('<', Some('=')) => self.eat_and(TokenKind::LessEqual),
+            ('<', _) => TokenKind::Less,
+            ('(', _) => TokenKind::LParen,
+            (')', _) => TokenKind::RParen,
+            ('{', _) => TokenKind::LBrace,
+            ('}', _) => TokenKind::RBrace,
+            ('[', _) => TokenKind::LBracket,
+            (']', _) => TokenKind::RBracket,
+            ('0'..='9', _) => self.number(),
+            ('"', _) => self.string(),
+            (c, _) if c == '_' || c.is_alphabetic() => self.identifier(),
             _ => TokenKind::Error,
         }
     }
@@ -196,6 +212,8 @@ impl<'src> Lexer<'src> {
             "let" => TokenKind::Let,
             "if" => TokenKind::If,
             "else" => TokenKind::Else,
+            "or" => TokenKind::Or,
+            "and" => TokenKind::And,
             _ => TokenKind::Identifier,
         }
     }
@@ -207,6 +225,11 @@ impl<'src> Lexer<'src> {
         } else {
             None
         }
+    }
+
+    fn eat_and(&mut self, token_kind: TokenKind) -> TokenKind {
+        self.eat();
+        token_kind
     }
 
     fn peek(&self) -> Option<char> {
