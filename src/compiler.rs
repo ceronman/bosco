@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use crate::ast::{Expression, Literal, Module, Statement};
 use wasm_encoder::{
-    CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection, Function,
-    FunctionSection, ImportSection, Instruction, MemoryType, TypeSection, ValType,
+    BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
+    Function, FunctionSection, ImportSection, Instruction, MemoryType, TypeSection, ValType,
 };
 
 use crate::lexer::{Token, TokenKind};
@@ -52,25 +52,29 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn resolve(&mut self, module: &Module) {
-        for statements in &module.statements {
+    fn maybe_declare_string(&mut self, expression: &Expression) {
+        if let Expression::Literal(Literal::String { token, value }) = expression {
+            let wasm_str = WasmStr {
+                memory: Compiler::MEM,
+                offset: self.data_offset,
+                len: value.len() as u32,
+            };
+            self.data_offset += wasm_str.len;
+            self.strings.insert(*token, wasm_str);
+            self.data.active(
+                wasm_str.memory,
+                &ConstExpr::i32_const(wasm_str.offset as i32),
+                value.bytes(),
+            );
+        }
+    }
+
+    fn resolve(&mut self, statements: &[Statement]) {
+        for statements in statements {
             match statements {
                 Statement::Call { callee: _, args } => {
                     for arg in args {
-                        if let Expression::Literal(Literal::String { token, value }) = arg {
-                            let wasm_str = WasmStr {
-                                memory: Compiler::MEM,
-                                offset: self.data_offset,
-                                len: value.len() as u32,
-                            };
-                            self.data_offset += wasm_str.len;
-                            self.strings.insert(*token, wasm_str);
-                            self.data.active(
-                                wasm_str.memory,
-                                &ConstExpr::i32_const(wasm_str.offset as i32),
-                                value.bytes(),
-                            );
-                        }
+                        self.maybe_declare_string(arg);
                     }
                 }
                 Statement::Declaration { name, ty, .. } => {
@@ -88,7 +92,16 @@ impl<'src> Compiler<'src> {
                     self.locals.insert(name, entry);
                 }
 
-                _ => {}
+                Statement::Assignment { .. } => {} // TODO: Complete
+
+                Statement::If {
+                    then_block,
+                    else_block,
+                    ..
+                } => {
+                    self.resolve(then_block);
+                    self.resolve(else_block);
+                }
             }
         }
     }
@@ -101,7 +114,15 @@ impl<'src> Compiler<'src> {
         let mut locals = self.locals.values().copied().collect::<Vec<_>>();
         locals.sort();
         let mut main_function = Function::new(locals.iter().map(|(_i, ty)| (1, *ty)));
-        for stmt in &module.statements {
+        self.statements(&mut main_function, &module.statements);
+        main_function.instruction(&Instruction::End);
+        self.codes.function(&main_function);
+        self.exports
+            .export("hello", ExportKind::Func, main_fn_index);
+    }
+
+    fn statements(&mut self, func: &mut Function, statements: &[Statement]) {
+        for stmt in statements {
             match stmt {
                 Statement::Call { callee, args, .. } => {
                     let callee_name = callee.lexeme(self.source);
@@ -116,11 +137,9 @@ impl<'src> Compiler<'src> {
                                 let Some(was_str) = self.strings.get(&token) else {
                                     panic!("Trying to print a non-existing string!");
                                 };
-                                main_function
-                                    .instruction(&Instruction::I32Const(was_str.offset as i32));
-                                main_function
-                                    .instruction(&Instruction::I32Const(was_str.len as i32));
-                                main_function.instruction(&Instruction::Call(callee));
+                                func.instruction(&Instruction::I32Const(was_str.offset as i32));
+                                func.instruction(&Instruction::I32Const(was_str.len as i32));
+                                func.instruction(&Instruction::Call(callee));
                             }
                             _ => panic!("Incorrect arguments for print!"),
                         },
@@ -128,8 +147,8 @@ impl<'src> Compiler<'src> {
                             if args.len() != 1 {
                                 panic!("Incorrect number of arguments for print_num!")
                             }
-                            self.expression(&mut main_function, &args[0]);
-                            main_function.instruction(&Instruction::Call(callee));
+                            self.expression(func, &args[0]);
+                            func.instruction(&Instruction::Call(callee));
                         }
                         _ => panic!("Unknown function {callee_name}"),
                     }
@@ -138,17 +157,26 @@ impl<'src> Compiler<'src> {
                 | Statement::Assignment { name, value } => {
                     let name = name.lexeme(self.source);
                     let (local_idx, _ty) = *self.locals.get(name).expect("Undeclared variable"); // TODO: Proper errors
-                    self.expression(&mut main_function, value);
-                    main_function.instruction(&Instruction::LocalSet(local_idx));
+                    self.expression(func, value);
+                    func.instruction(&Instruction::LocalSet(local_idx));
                 }
 
-                _ => panic!("Unresolved statement"),
+                Statement::If {
+                    condition,
+                    then_block,
+                    else_block,
+                } => {
+                    self.expression(func, condition);
+                    func.instruction(&Instruction::If(BlockType::Empty));
+                    self.statements(func, then_block);
+                    if !else_block.is_empty() {
+                        func.instruction(&Instruction::Else);
+                        self.statements(func, else_block);
+                    }
+                    func.instruction(&Instruction::End);
+                }
             }
         }
-        main_function.instruction(&Instruction::End);
-        self.codes.function(&main_function);
-        self.exports
-            .export("hello", ExportKind::Func, main_fn_index);
     }
 
     fn expression(&mut self, func: &mut Function, expr: &Expression) {
@@ -169,14 +197,21 @@ impl<'src> Compiler<'src> {
 
                 // TODO: Not deal with tokens here?
                 // TODO: Types!
-                match operator.kind {
-                    TokenKind::Plus => func.instruction(&Instruction::I32Add),
-                    TokenKind::Minus => func.instruction(&Instruction::I32Sub),
-                    TokenKind::Star => func.instruction(&Instruction::I32Mul),
-                    TokenKind::Slash => func.instruction(&Instruction::I32DivS),
-                    TokenKind::Percent => func.instruction(&Instruction::I32RemS),
+                let ins = match operator.kind {
+                    TokenKind::EqualEqual => Instruction::I32Eq,
+                    TokenKind::BangEqual => Instruction::I32Ne,
+                    TokenKind::Greater => Instruction::I32GtS,
+                    TokenKind::GreaterEqual => Instruction::I32GeS,
+                    TokenKind::Less => Instruction::I32LtS,
+                    TokenKind::LessEqual => Instruction::I32LeS,
+                    TokenKind::Plus => Instruction::I32Add,
+                    TokenKind::Minus => Instruction::I32Sub,
+                    TokenKind::Star => Instruction::I32Mul,
+                    TokenKind::Slash => Instruction::I32DivS,
+                    TokenKind::Percent => Instruction::I32RemS,
                     _ => panic!("Unsupported operant {:?}", operator.kind),
                 };
+                func.instruction(&ins);
             }
             Expression::Variable { name } => {
                 let name = name.lexeme(self.source);
@@ -194,7 +229,7 @@ impl<'src> Compiler<'src> {
         let print_idx = self.import_function("js", "print_num", &[ValType::I32], &[]);
         self.fn_indices.insert("print_num", print_idx);
         self.import_memory();
-        self.resolve(module);
+        self.resolve(&module.statements);
         self.main(module);
 
         let mut wasm_module = wasm_encoder::Module::new();

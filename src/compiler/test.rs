@@ -95,3 +95,28 @@ fn test_expressions() {
         "#,
     )
 }
+
+#[test]
+fn test_if_statement() {
+    program_test(
+        r#"
+            let a i32 = 1
+            let b i32 = 2
+            if a > b {
+                print("first")
+            } else {
+                print("second")
+            }
+            if 1 > 10 {
+                print("Should not print")
+            }
+            if a == 1 {
+                print("This should be printed")
+            }
+        "#,
+        r#"
+            second
+            This should be printed
+        "#,
+    )
+}
