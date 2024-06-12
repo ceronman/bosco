@@ -1,7 +1,7 @@
 use crate::ast::{Expression, Literal, Module, Statement};
 use crate::lexer::Token;
 use crate::parser::parse;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{format, Debug, Formatter};
 use std::str::Chars;
 
 trait SExpr {
@@ -67,6 +67,12 @@ impl SExpr for Expression {
                 left.s_expr(src),
                 right.s_expr(src)
             ),
+            Expression::Or { left, right } => {
+                format!("(or {} {})", left.s_expr(src), right.s_expr(src))
+            }
+            Expression::And { left, right } => {
+                format!("(and {} {})", left.s_expr(src), right.s_expr(src))
+            }
         }
     }
 }

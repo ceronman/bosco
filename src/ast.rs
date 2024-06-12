@@ -38,6 +38,14 @@ pub enum Expression {
         right: Box<Expression>,
         operator: Token,
     },
+    Or {
+        left: Box<Expression>,
+        right: Box<Expression>,
+    },
+    And {
+        left: Box<Expression>,
+        right: Box<Expression>,
+    },
 }
 
 #[derive(Debug)]

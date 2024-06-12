@@ -113,10 +113,15 @@ fn test_if_statement() {
             if a == 1 {
                 print("This should be printed")
             }
+            
+            if a < 0 or b > 4 or a == 1 and b == 2 {
+                print("logical operators work")
+            }
         "#,
         r#"
             second
             This should be printed
+            logical operators work
         "#,
     )
 }

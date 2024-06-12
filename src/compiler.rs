@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::ast::{Expression, Literal, Module, Statement};
+use wasm_encoder::ValType::I32;
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
     Function, FunctionSection, ImportSection, Instruction, MemoryType, TypeSection, ValType,
@@ -212,6 +213,22 @@ impl<'src> Compiler<'src> {
                     _ => panic!("Unsupported operant {:?}", operator.kind),
                 };
                 func.instruction(&ins);
+            }
+            Expression::Or { left, right } => {
+                self.expression(func, left);
+                func.instruction(&Instruction::If(BlockType::Result(I32)));
+                func.instruction(&Instruction::I32Const(1));
+                func.instruction(&Instruction::Else);
+                self.expression(func, right);
+                func.instruction(&Instruction::End);
+            }
+            Expression::And { left, right } => {
+                self.expression(func, left);
+                func.instruction(&Instruction::If(BlockType::Result(I32)));
+                self.expression(func, right);
+                func.instruction(&Instruction::Else);
+                func.instruction(&Instruction::I32Const(0));
+                func.instruction(&Instruction::End);
             }
             Expression::Variable { name } => {
                 let name = name.lexeme(self.source);

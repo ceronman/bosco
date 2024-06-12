@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod test;
 
-use crate::ast::Expression::Binary;
 use crate::ast::{Expression, Literal, Module, Statement};
 use crate::lexer::{Lexer, Token, TokenKind};
 use std::error::Error;
@@ -73,6 +72,7 @@ impl<'src> Parser<'src> {
     fn expression_precedence(&mut self, min_precedence: u8) -> Result<Expression> {
         let mut left = match self.token.kind {
             TokenKind::LParen => {
+                // TODO: Generalize
                 self.eat();
                 let inner = self.expression()?;
                 self.expect(TokenKind::RParen)?;
@@ -91,10 +91,21 @@ impl<'src> Parser<'src> {
             }
             self.eat();
             let right = self.expression_precedence(precedence + 1)?;
-            left = Binary {
-                left: Box::new(left),
-                right: Box::new(right),
-                operator,
+
+            left = match operator.kind {
+                TokenKind::Or => Expression::Or {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                TokenKind::And => Expression::And {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                _ => Expression::Binary {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                    operator,
+                },
             };
         }
         Ok(left)
