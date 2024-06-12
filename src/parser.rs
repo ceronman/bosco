@@ -70,13 +70,20 @@ impl<'src> Parser<'src> {
     }
 
     fn expression_precedence(&mut self, min_precedence: u8) -> Result<Expression> {
+        // TODO: Generalize?
         let mut left = match self.token.kind {
             TokenKind::LParen => {
-                // TODO: Generalize
                 self.eat();
-                let inner = self.expression()?;
+                let inner = self.expression()?; // TODO: Prattify, test nesting
                 self.expect(TokenKind::RParen)?;
                 inner
+            }
+            TokenKind::Not => {
+                self.eat();
+                let right = self.expression_precedence(7)?;
+                Expression::Not {
+                    right: Box::new(right),
+                }
             }
             _ => self.expression_atom()?,
         };
@@ -92,6 +99,7 @@ impl<'src> Parser<'src> {
             self.eat();
             let right = self.expression_precedence(precedence + 1)?;
 
+            // TODO: Generalize?
             left = match operator.kind {
                 TokenKind::Or => Expression::Or {
                     left: Box::new(left),

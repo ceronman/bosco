@@ -19,6 +19,7 @@ pub enum TokenKind {
     Less,
     LessEqual,
 
+    Not,
     Or,
     And,
 
@@ -214,6 +215,7 @@ impl<'src> Lexer<'src> {
             "else" => TokenKind::Else,
             "or" => TokenKind::Or,
             "and" => TokenKind::And,
+            "not" => TokenKind::Not,
             _ => TokenKind::Identifier,
         }
     }

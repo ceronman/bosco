@@ -73,6 +73,7 @@ impl SExpr for Expression {
             Expression::And { left, right } => {
                 format!("(and {} {})", left.s_expr(src), right.s_expr(src))
             }
+            Expression::Not { right } => format!("(not {})", right.s_expr(src)),
         }
     }
 }

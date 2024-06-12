@@ -182,6 +182,7 @@ fn boolean_expressions() {
             b != c
             x or y
             a and b
+            not z
         "#,
         vec![
             Eol,
@@ -215,6 +216,9 @@ fn boolean_expressions() {
             Eol,
             Identifier,
             And,
+            Identifier,
+            Eol,
+            Not,
             Identifier,
             Eol,
         ],

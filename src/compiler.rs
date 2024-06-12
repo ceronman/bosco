@@ -230,6 +230,14 @@ impl<'src> Compiler<'src> {
                 func.instruction(&Instruction::I32Const(0));
                 func.instruction(&Instruction::End);
             }
+            Expression::Not { right } => {
+                self.expression(func, right);
+                func.instruction(&Instruction::If(BlockType::Result(I32)));
+                func.instruction(&Instruction::I32Const(0));
+                func.instruction(&Instruction::Else);
+                func.instruction(&Instruction::I32Const(1));
+                func.instruction(&Instruction::End);
+            }
             Expression::Variable { name } => {
                 let name = name.lexeme(self.source);
                 let Some((index, _ty)) = self.locals.get(&name) else {

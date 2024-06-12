@@ -46,6 +46,9 @@ pub enum Expression {
         left: Box<Expression>,
         right: Box<Expression>,
     },
+    Not {
+        right: Box<Expression>,
+    },
 }
 
 #[derive(Debug)]
