@@ -43,9 +43,11 @@ pub enum TokenKind {
     Let,
     If,
     Else,
+    While,
 
     LineComment,
     BlockComment,
+
     Whitespace,
     Eol,
 
@@ -213,6 +215,7 @@ impl<'src> Lexer<'src> {
             "let" => TokenKind::Let,
             "if" => TokenKind::If,
             "else" => TokenKind::Else,
+            "while" => TokenKind::While,
             "or" => TokenKind::Or,
             "and" => TokenKind::And,
             "not" => TokenKind::Not,

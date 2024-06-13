@@ -47,7 +47,7 @@ impl<'src> Compiler<'src> {
             functions: Default::default(),
             codes: Default::default(),
             data: Default::default(),
-            data_offset: 0,
+            data_offset: Default::default(),
             imports: Default::default(),
             exports: Default::default(),
         }
@@ -103,6 +103,8 @@ impl<'src> Compiler<'src> {
                     self.resolve(then_block);
                     self.resolve(else_block);
                 }
+
+                Statement::While { body, .. } => self.resolve(body),
             }
         }
     }
@@ -175,6 +177,16 @@ impl<'src> Compiler<'src> {
                         self.statements(func, else_block);
                     }
                     func.instruction(&Instruction::End);
+                }
+
+                Statement::While { condition, body } => {
+                    func.instruction(&Instruction::Loop(BlockType::Empty));
+                    self.expression(func, condition);
+                    func.instruction(&Instruction::If(BlockType::Empty));
+                    self.statements(func, body);
+                    func.instruction(&Instruction::Br(1)); // 1 refers to the loop instruction
+                    func.instruction(&Instruction::End); // End of if
+                    func.instruction(&Instruction::End); // End of loop
                 }
             }
         }

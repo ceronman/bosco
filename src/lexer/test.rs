@@ -243,3 +243,8 @@ fn strings_together() {
         false,
     );
 }
+
+#[test]
+fn control_flow() {
+    test_lexer(r#"if else while"#, vec![If, Else, While], true);
+}

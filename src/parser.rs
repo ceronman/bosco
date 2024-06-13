@@ -60,6 +60,7 @@ impl<'src> Parser<'src> {
         match self.token.kind {
             TokenKind::Let => self.declaration(),
             TokenKind::If => self.if_statement(),
+            TokenKind::While => self.while_statement(),
             TokenKind::Identifier => match self.peek().kind {
                 TokenKind::LParen => self.call(),
                 TokenKind::Equal => self.assignment(),
@@ -198,31 +199,39 @@ impl<'src> Parser<'src> {
     fn if_statement(&mut self) -> Result<Statement> {
         self.expect(TokenKind::If)?;
         let condition = self.expression()?;
-        self.expect(TokenKind::LBrace)?;
-        self.maybe_eol();
-        let mut then_block = Vec::new();
-        while self.token.kind != TokenKind::RBrace {
-            then_block.push(self.statement()?);
-            self.maybe_eol();
-        }
-        self.expect(TokenKind::RBrace)?;
-        self.maybe_eol();
+        let then_block = self.block()?;
         let mut else_block = Vec::new();
         if self.token.kind == TokenKind::Else {
+            // TODO: Maybe use a match function for this pattern
             self.eat();
-            self.expect(TokenKind::LBrace)?;
-            self.maybe_eol();
-            while self.token.kind != TokenKind::RBrace {
-                else_block.push(self.statement()?);
-                self.maybe_eol();
-            }
-            self.expect(TokenKind::RBrace)?;
+            else_block = self.block()?;
         }
         Ok(Statement::If {
             condition,
             then_block,
             else_block,
         })
+    }
+
+    fn block(&mut self) -> Result<Vec<Statement>> {
+        self.maybe_eol();
+        self.expect(TokenKind::LBrace)?;
+        self.maybe_eol();
+        let mut statements = Vec::new();
+        while self.token.kind != TokenKind::RBrace {
+            statements.push(self.statement()?);
+            self.maybe_eol();
+        }
+        self.expect(TokenKind::RBrace)?;
+        self.maybe_eol();
+        Ok(statements)
+    }
+
+    fn while_statement(&mut self) -> Result<Statement> {
+        self.expect(TokenKind::While)?;
+        let condition = self.expression()?;
+        let body = self.block()?;
+        Ok(Statement::While { condition, body })
     }
 
     fn maybe_eol(&mut self) {

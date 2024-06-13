@@ -2,7 +2,7 @@ use crate::lexer::Token;
 
 #[derive(Debug)]
 pub struct Module {
-    pub statements: Vec<Statement>,
+    pub statements: Vec<Statement>, // TODO: Better way to represent body/block
 }
 
 #[derive(Debug)]
@@ -24,6 +24,10 @@ pub enum Statement {
         condition: Expression,
         then_block: Vec<Statement>,
         else_block: Vec<Statement>,
+    },
+    While {
+        condition: Expression,
+        body: Vec<Statement>,
     },
 }
 

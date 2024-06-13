@@ -48,6 +48,10 @@ impl SExpr for Statement {
                     else_block.s_expr(src)
                 )
             }
+
+            Statement::While { condition, body } => {
+                format!("(while {} ({}))", condition.s_expr(src), body.s_expr(src))
+            }
         }
     }
 }

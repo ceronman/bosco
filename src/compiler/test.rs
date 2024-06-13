@@ -24,8 +24,10 @@ fn program_test(source: &str, expected_out: &str) {
     f.flush().unwrap();
     // let wat = wasmprinter::print_bytes(bytes).unwrap();
     // println!("{}", wat);
+
     use std::process::{Command, Stdio};
 
+    // TODO: Instead of using deno, use wasmi or similar
     let output = Command::new("deno")
         .current_dir("web")
         .arg("run")
@@ -42,9 +44,9 @@ fn program_test(source: &str, expected_out: &str) {
         .map(|e| e.trim())
         .collect::<Vec<_>>()
         .join("\n");
-    assert_eq!(e, std::str::from_utf8(&output.stdout).unwrap().trim());
 
     std::fs::remove_file(format!("web/{}", filename)).unwrap();
+    assert_eq!(std::str::from_utf8(&output.stdout).unwrap().trim(), e);
 }
 
 #[test]
@@ -122,6 +124,28 @@ fn test_if_statement() {
             second
             This should be printed
             logical operators work
+        "#,
+    )
+}
+
+#[test]
+fn test_while_loop() {
+    program_test(
+        r#"
+            let x i32 = 5
+            while x > 0 {
+                print_num(x)
+                x = x - 1
+            }
+            print("end")
+        "#,
+        r#"
+            5
+            4
+            3
+            2
+            1
+            end
         "#,
     )
 }
