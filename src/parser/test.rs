@@ -1,7 +1,7 @@
 use crate::ast::{Expression, Literal, Module, Statement};
 use crate::lexer::Token;
 use crate::parser::parse;
-use std::fmt::{format, Debug, Formatter};
+use std::fmt::{Debug, Formatter};
 use std::str::Chars;
 
 trait SExpr {

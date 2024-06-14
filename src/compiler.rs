@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 
 use crate::ast::{Expression, Literal, Module, Statement};
 use wasm_encoder::ValType::I32;
@@ -19,6 +20,28 @@ struct WasmStr {
     offset: u32,
     len: u32,
 }
+
+pub enum CompileError {
+    ParseError(ParseError),
+    CompilationError(String),
+}
+
+impl Display for CompileError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CompileError::CompilationError(s) => write!(f, "Compilation error: {}", s),
+            CompileError::ParseError(p) => write!(f, "Parse error: {p} ({}, {})", p.start, p.end),
+        }
+    }
+}
+
+impl From<ParseError> for CompileError {
+    fn from(value: ParseError) -> Self {
+        CompileError::ParseError(value)
+    }
+}
+
+type Result<T> = std::result::Result<T, CompileError>;
 
 struct Compiler<'src> {
     source: &'src str,
@@ -70,7 +93,11 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn resolve(&mut self, statements: &[Statement]) {
+    fn error<T>(&self, msg: &str) -> Result<T> {
+        Err(CompileError::CompilationError(msg.to_string()))
+    }
+
+    fn resolve(&mut self, statements: &[Statement]) -> Result<()> {
         for statements in statements {
             match statements {
                 Statement::Call { callee: _, args } => {
@@ -86,7 +113,7 @@ impl<'src> Compiler<'src> {
                         "i64" => ValType::I64,
                         "f32" => ValType::F32,
                         "f64" => ValType::F32,
-                        _ => panic!("Unsupported type {ty_lexeme}!"), // TODO: Do not panic, proper error.
+                        _ => return self.error(&format!("Unsupported type {ty_lexeme}!")),
                     };
                     let local_idx = self.locals.len();
                     let entry = (local_idx as u32, ty);
@@ -100,16 +127,17 @@ impl<'src> Compiler<'src> {
                     else_block,
                     ..
                 } => {
-                    self.resolve(then_block);
-                    self.resolve(else_block);
+                    self.resolve(then_block)?;
+                    self.resolve(else_block)?;
                 }
 
-                Statement::While { body, .. } => self.resolve(body),
+                Statement::While { body, .. } => self.resolve(body)?,
             }
         }
+        Ok(())
     }
 
-    fn main(&mut self, module: &Module) {
+    fn main(&mut self, module: &Module) -> Result<()> {
         let type_index = self.types.len();
         self.types.function(vec![], vec![]);
         let main_fn_index = self.imports.len() - 1;
@@ -117,50 +145,52 @@ impl<'src> Compiler<'src> {
         let mut locals = self.locals.values().copied().collect::<Vec<_>>();
         locals.sort();
         let mut main_function = Function::new(locals.iter().map(|(_i, ty)| (1, *ty)));
-        self.statements(&mut main_function, &module.statements);
+        self.statements(&mut main_function, &module.statements)?;
         main_function.instruction(&Instruction::End);
         self.codes.function(&main_function);
         self.exports
             .export("hello", ExportKind::Func, main_fn_index);
+        Ok(())
     }
 
-    fn statements(&mut self, func: &mut Function, statements: &[Statement]) {
+    fn statements(&mut self, func: &mut Function, statements: &[Statement]) -> Result<()> {
         for stmt in statements {
             match stmt {
                 Statement::Call { callee, args, .. } => {
                     let callee_name = callee.lexeme(self.source);
-                    let callee = *self
-                        .fn_indices
-                        .get(callee_name)
-                        .unwrap_or_else(|| panic!("Function '{callee_name}' not found!"));
+                    let Some(&callee) = self.fn_indices.get(callee_name) else {
+                        return self.error(&format!("Function '{callee_name}' not found!"));
+                    };
 
                     match callee_name {
                         "print" => match args[..] {
                             [Expression::Literal(Literal::String { token, .. })] => {
                                 let Some(was_str) = self.strings.get(&token) else {
-                                    panic!("Trying to print a non-existing string!");
+                                    return self.error("Trying to print a non-existing string!");
                                 };
                                 func.instruction(&Instruction::I32Const(was_str.offset as i32));
                                 func.instruction(&Instruction::I32Const(was_str.len as i32));
                                 func.instruction(&Instruction::Call(callee));
                             }
-                            _ => panic!("Incorrect arguments for print!"),
+                            _ => return self.error("Incorrect arguments for print!"),
                         },
                         "print_num" => {
                             if args.len() != 1 {
-                                panic!("Incorrect number of arguments for print_num!")
+                                return self.error("Incorrect number of arguments for print_num!");
                             }
-                            self.expression(func, &args[0]);
+                            self.expression(func, &args[0])?;
                             func.instruction(&Instruction::Call(callee));
                         }
-                        _ => panic!("Unknown function {callee_name}"),
+                        _ => return self.error(&format!("Unknown function {callee_name}")),
                     }
                 }
                 Statement::Declaration { name, value, .. }
                 | Statement::Assignment { name, value } => {
                     let name = name.lexeme(self.source);
-                    let (local_idx, _ty) = *self.locals.get(name).expect("Undeclared variable"); // TODO: Proper errors
-                    self.expression(func, value);
+                    let Some(&(local_idx, _ty)) = self.locals.get(name) else {
+                        return self.error("Undeclared variable");
+                    };
+                    self.expression(func, value)?;
                     func.instruction(&Instruction::LocalSet(local_idx));
                 }
 
@@ -169,30 +199,31 @@ impl<'src> Compiler<'src> {
                     then_block,
                     else_block,
                 } => {
-                    self.expression(func, condition);
+                    self.expression(func, condition)?;
                     func.instruction(&Instruction::If(BlockType::Empty));
-                    self.statements(func, then_block);
+                    self.statements(func, then_block)?;
                     if !else_block.is_empty() {
                         func.instruction(&Instruction::Else);
-                        self.statements(func, else_block);
+                        self.statements(func, else_block)?;
                     }
                     func.instruction(&Instruction::End);
                 }
 
                 Statement::While { condition, body } => {
                     func.instruction(&Instruction::Loop(BlockType::Empty));
-                    self.expression(func, condition);
+                    self.expression(func, condition)?;
                     func.instruction(&Instruction::If(BlockType::Empty));
-                    self.statements(func, body);
+                    self.statements(func, body)?;
                     func.instruction(&Instruction::Br(1)); // 1 refers to the loop instruction
                     func.instruction(&Instruction::End); // End of if
                     func.instruction(&Instruction::End); // End of loop
                 }
             }
         }
+        Ok(())
     }
 
-    fn expression(&mut self, func: &mut Function, expr: &Expression) {
+    fn expression(&mut self, func: &mut Function, expr: &Expression) -> Result<()> {
         match expr {
             Expression::Literal(Literal::Number(value)) => {
                 func.instruction(&Instruction::I32Const(*value));
@@ -205,8 +236,8 @@ impl<'src> Compiler<'src> {
                 right,
                 operator,
             } => {
-                self.expression(func, left);
-                self.expression(func, right);
+                self.expression(func, left)?;
+                self.expression(func, right)?;
 
                 // TODO: Not deal with tokens here?
                 // TODO: Types!
@@ -222,28 +253,28 @@ impl<'src> Compiler<'src> {
                     TokenKind::Star => Instruction::I32Mul,
                     TokenKind::Slash => Instruction::I32DivS,
                     TokenKind::Percent => Instruction::I32RemS,
-                    _ => panic!("Unsupported operant {:?}", operator.kind),
+                    _ => return self.error(&format!("Unsupported operant {:?}", operator.kind)),
                 };
                 func.instruction(&ins);
             }
             Expression::Or { left, right } => {
-                self.expression(func, left);
+                self.expression(func, left)?;
                 func.instruction(&Instruction::If(BlockType::Result(I32)));
                 func.instruction(&Instruction::I32Const(1));
                 func.instruction(&Instruction::Else);
-                self.expression(func, right);
+                self.expression(func, right)?;
                 func.instruction(&Instruction::End);
             }
             Expression::And { left, right } => {
-                self.expression(func, left);
+                self.expression(func, left)?;
                 func.instruction(&Instruction::If(BlockType::Result(I32)));
-                self.expression(func, right);
+                self.expression(func, right)?;
                 func.instruction(&Instruction::Else);
                 func.instruction(&Instruction::I32Const(0));
                 func.instruction(&Instruction::End);
             }
             Expression::Not { right } => {
-                self.expression(func, right);
+                self.expression(func, right)?;
                 func.instruction(&Instruction::If(BlockType::Result(I32)));
                 func.instruction(&Instruction::I32Const(0));
                 func.instruction(&Instruction::Else);
@@ -253,21 +284,22 @@ impl<'src> Compiler<'src> {
             Expression::Variable { name } => {
                 let name = name.lexeme(self.source);
                 let Some((index, _ty)) = self.locals.get(&name) else {
-                    panic!("Trying to get non-existent local");
+                    return self.error("Trying to get non-existent local");
                 };
                 func.instruction(&Instruction::LocalGet(*index));
             }
         }
+        Ok(())
     }
 
-    fn compile(&mut self, module: &Module) -> Vec<u8> {
+    fn compile(&mut self, module: &Module) -> Result<Vec<u8>> {
         let print_idx = self.import_function("js", "print", &[ValType::I32, ValType::I32], &[]);
         self.fn_indices.insert("print", print_idx);
         let print_idx = self.import_function("js", "print_num", &[ValType::I32], &[]);
         self.fn_indices.insert("print_num", print_idx);
         self.import_memory();
-        self.resolve(&module.statements);
-        self.main(module);
+        self.resolve(&module.statements)?;
+        self.main(module)?;
 
         let mut wasm_module = wasm_encoder::Module::new();
 
@@ -278,7 +310,7 @@ impl<'src> Compiler<'src> {
         wasm_module.section(&self.codes);
         wasm_module.section(&self.data);
 
-        wasm_module.finish()
+        Ok(wasm_module.finish())
     }
 
     fn import_function(
@@ -312,8 +344,8 @@ impl<'src> Compiler<'src> {
     }
 }
 
-pub fn compile(source: &str) -> Result<Vec<u8>, ParseError> {
+pub fn compile(source: &str) -> Result<Vec<u8>> {
     let module = parse(source)?;
     let mut compiler = Compiler::new(source);
-    Ok(compiler.compile(&module))
+    compiler.compile(&module)
 }

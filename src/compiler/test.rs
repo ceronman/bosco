@@ -8,7 +8,10 @@ static GLOBAL_THREAD_COUNT: AtomicUsize = AtomicUsize::new(0);
 fn program_test(source: &str, expected_out: &str) {
     let module = parse(source).unwrap(); // TODO: Improve error display
     let mut compiler = Compiler::new(source);
-    let bytes = compiler.compile(&module);
+    let bytes = compiler.compile(&module).unwrap_or_else(|e| {
+        eprintln!("ERROR: {e}");
+        std::process::exit(1);
+    });
     let filename = format!(
         "test_{}.wasm",
         GLOBAL_THREAD_COUNT.fetch_add(1, Ordering::Relaxed)
