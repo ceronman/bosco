@@ -1,55 +1,70 @@
-use crate::compiler::Compiler;
-use crate::parser::parse;
-use std::io::Write;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
-static GLOBAL_THREAD_COUNT: AtomicUsize = AtomicUsize::new(0);
+use wasmi::{Caller, Engine, Func, Linker, Memory, MemoryType, Module, Store};
 
-fn program_test(source: &str, expected_out: &str) {
-    let module = parse(source).unwrap(); // TODO: Improve error display
-    let mut compiler = Compiler::new(source);
-    let bytes = compiler.compile(&module).unwrap_or_else(|e| {
-        eprintln!("ERROR: {e}");
-        std::process::exit(1);
-    });
-    let filename = format!(
-        "test_{}.wasm",
-        GLOBAL_THREAD_COUNT.fetch_add(1, Ordering::Relaxed)
+use crate::compiler::compile;
+
+fn run_in_wasmi(source: &str) -> anyhow::Result<String> {
+    let wasm = compile(source)?;
+    let engine = Engine::default();
+    let module = Module::new(&engine, &wasm)?;
+
+    type HostState = ();
+    let mut store = Store::new(&engine, ());
+
+    let memory_type = MemoryType::new(1, None).unwrap();
+    let memory = Memory::new(&mut store, memory_type).unwrap();
+    let imported_memory = memory.clone();
+    let output = Arc::new(Mutex::new(String::new()));
+    let output_print = output.clone();
+    let print = Func::wrap(
+        &mut store,
+        move |caller: Caller<'_, ()>, ptr: i32, len: i32| {
+            let bytes = &imported_memory.data(&caller)[(ptr as usize)..(ptr + len) as usize];
+            let message = std::str::from_utf8(bytes).unwrap();
+            output_print.lock().unwrap().push_str(message);
+            output_print.lock().unwrap().push('\n');
+            Ok(())
+        },
     );
 
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(format!("web/{}", filename))
-        .unwrap();
-    f.write_all(&bytes).unwrap();
-    f.flush().unwrap();
-    // let wat = wasmprinter::print_bytes(bytes).unwrap();
-    // println!("{}", wat);
+    let output_print_num = output.clone();
+    let print_num = Func::wrap(&mut store, move |_caller: Caller<'_, ()>, num: i32| {
+        output_print_num
+            .lock()
+            .unwrap()
+            .push_str(&format!("{num}\n"));
+        Ok(())
+    });
 
-    use std::process::{Command, Stdio};
+    let mut linker = <Linker<HostState>>::new(&engine);
+    linker.define("js", "print", print)?;
+    linker.define("js", "print_num", print_num)?;
+    linker.define("js", "mem", memory)?;
 
-    // TODO: Instead of using deno, use wasmi or similar
-    let output = Command::new("deno")
-        .current_dir("web")
-        .arg("run")
-        .arg("--allow-read")
-        .arg("hello.ts")
-        .arg(&filename)
-        .stdout(Stdio::piped())
-        .output()
-        .unwrap();
+    let instance = linker.instantiate(&mut store, &module)?.start(&mut store)?;
+    let hello = instance.get_typed_func::<(), ()>(&store, "hello")?;
+    hello.call(&mut store, ())?;
 
-    let e = expected_out
-        .trim()
-        .lines()
-        .map(|e| e.trim())
-        .collect::<Vec<_>>()
-        .join("\n");
+    let result = output.clone().lock().unwrap().as_str().to_string();
+    Ok(result)
+}
 
-    std::fs::remove_file(format!("web/{}", filename)).unwrap();
-    assert_eq!(std::str::from_utf8(&output.stdout).unwrap().trim(), e);
+fn program_test(source: &str, expected_out: &str) {
+    match run_in_wasmi(source) {
+        Ok(output) => {
+            assert_eq!(
+                output.trim(),
+                expected_out
+                    .trim()
+                    .lines()
+                    .map(|e| e.trim())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+        }
+        Err(e) => panic!("{e:?}"),
+    }
 }
 
 #[test]

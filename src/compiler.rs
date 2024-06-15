@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 use crate::ast::{Expression, Literal, Module, Statement};
@@ -21,10 +22,13 @@ struct WasmStr {
     len: u32,
 }
 
+#[derive(Debug)]
 pub enum CompileError {
     ParseError(ParseError),
     CompilationError(String),
 }
+
+impl Error for CompileError {}
 
 impl Display for CompileError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
