@@ -93,6 +93,7 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    // TODO: Maybe make this configurable via lexer mode or move to parser
     pub fn skip_ws(&mut self) -> Token {
         loop {
             let token = self.next_token();

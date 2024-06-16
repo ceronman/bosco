@@ -74,13 +74,13 @@ impl<'src> Parser<'src> {
         // TODO: Generalize?
         let mut left = match self.token.kind {
             TokenKind::LParen => {
-                self.eat();
+                self.advance();
                 let inner = self.expression()?; // TODO: Prattify, test nesting
                 self.expect(TokenKind::RParen)?;
                 inner
             }
             TokenKind::Not => {
-                self.eat();
+                self.advance();
                 let right = self.expression_precedence(7)?;
                 Expression::Not {
                     right: Box::new(right),
@@ -97,7 +97,7 @@ impl<'src> Parser<'src> {
             if precedence < min_precedence {
                 break;
             }
-            self.eat();
+            self.advance();
             let right = self.expression_precedence(precedence + 1)?;
 
             // TODO: Generalize?
@@ -146,10 +146,11 @@ impl<'src> Parser<'src> {
     }
 
     fn literal(&mut self) -> Result<Expression> {
-        let token = self.eat();
+        let token = self.token;
         match token.kind {
             TokenKind::Str => {
                 let value = self.source[(token.start + 1)..(token.end - 1)].to_string();
+                self.advance();
                 Ok(Expression::Literal(Literal::String { token, value }))
             }
             TokenKind::Number => {
@@ -159,6 +160,7 @@ impl<'src> Parser<'src> {
                     start: token.start,
                     end: token.end,
                 })?;
+                self.advance();
                 Ok(Expression::Literal(Literal::Number(value)))
             }
             _ => self.error(format!("Expected literal, got {:?}", token.kind)),
@@ -166,7 +168,9 @@ impl<'src> Parser<'src> {
     }
 
     fn variable(&mut self) -> Result<Expression> {
-        Ok(Expression::Variable { name: self.eat() })
+        Ok(Expression::Variable {
+            name: self.expect(TokenKind::Identifier)?,
+        })
     }
 
     fn call(&mut self) -> Result<Statement> {
@@ -201,11 +205,10 @@ impl<'src> Parser<'src> {
         let condition = self.expression()?;
         let then_block = self.block()?;
         let mut else_block = Vec::new();
-        if self.token.kind == TokenKind::Else {
-            // TODO: Maybe use a match function for this pattern
-            self.eat();
+        if self.eat(TokenKind::Else) {
             else_block = self.block()?;
         }
+
         Ok(Statement::If {
             condition,
             then_block,
@@ -235,19 +238,24 @@ impl<'src> Parser<'src> {
     }
 
     fn maybe_eol(&mut self) {
-        while let TokenKind::Eol = self.token.kind {
-            self.eat();
-        }
+        while self.eat(TokenKind::Eol) {}
     }
 
     fn peek(&self) -> Token {
         self.lexer.clone().skip_ws()
     }
 
-    fn eat(&mut self) -> Token {
-        let prev = self.token;
+    fn advance(&mut self) {
         self.token = self.lexer.skip_ws();
-        prev
+    }
+
+    fn eat(&mut self, kind: TokenKind) -> bool {
+        if self.token.kind == kind {
+            self.advance();
+            true
+        } else {
+            false
+        }
     }
 
     fn expect(&mut self, token_kind: TokenKind) -> Result<Token> {
