@@ -1,6 +1,6 @@
+use anyhow::Result;
 use std::collections::HashMap;
-use std::error::Error;
-use std::fmt::{Display, Formatter};
+use thiserror::Error;
 
 use crate::ast::{Expression, Literal, Module, Statement};
 use wasm_encoder::ValType::I32;
@@ -22,21 +22,12 @@ struct WasmStr {
     len: u32,
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum CompileError {
+    #[error("{0}")]
     ParseError(ParseError),
+    #[error("Compilation error: {0}")]
     CompilationError(String),
-}
-
-impl Error for CompileError {}
-
-impl Display for CompileError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CompileError::CompilationError(s) => write!(f, "Compilation error: {}", s),
-            CompileError::ParseError(p) => write!(f, "Parse error: {p} ({}, {})", p.start, p.end),
-        }
-    }
 }
 
 impl From<ParseError> for CompileError {
@@ -44,8 +35,6 @@ impl From<ParseError> for CompileError {
         CompileError::ParseError(value)
     }
 }
-
-type Result<T> = std::result::Result<T, CompileError>;
 
 struct Compiler<'src> {
     source: &'src str,
@@ -98,7 +87,7 @@ impl<'src> Compiler<'src> {
     }
 
     fn error<T>(&self, msg: &str) -> Result<T> {
-        Err(CompileError::CompilationError(msg.to_string()))
+        Err(CompileError::CompilationError(msg.to_string()).into())
     }
 
     fn resolve(&mut self, statements: &[Statement]) -> Result<()> {
