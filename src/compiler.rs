@@ -90,42 +90,45 @@ impl<'src> Compiler<'src> {
         Err(CompileError::CompilationError(msg.to_string()).into())
     }
 
-    fn resolve(&mut self, statements: &[Statement]) -> Result<()> {
-        for statements in statements {
-            match statements {
-                Statement::Call { callee: _, args } => {
-                    for arg in args {
-                        self.maybe_declare_string(arg);
-                    }
+    fn resolve(&mut self, statement: &Statement) -> Result<()> {
+        match statement {
+            Statement::Block { statements } => {
+                for statement in statements {
+                    self.resolve(statement)?
                 }
-                Statement::Declaration { name, ty, .. } => {
-                    let name = name.lexeme(self.source);
-                    let ty_lexeme = ty.lexeme(self.source);
-                    let ty = match ty_lexeme {
-                        "i32" => ValType::I32,
-                        "i64" => ValType::I64,
-                        "f32" => ValType::F32,
-                        "f64" => ValType::F32,
-                        _ => return self.error(&format!("Unsupported type {ty_lexeme}!")),
-                    };
-                    let local_idx = self.locals.len();
-                    let entry = (local_idx as u32, ty);
-                    self.locals.insert(name, entry);
-                }
-
-                Statement::Assignment { .. } => {} // TODO: Complete
-
-                Statement::If {
-                    then_block,
-                    else_block,
-                    ..
-                } => {
-                    self.resolve(then_block)?;
-                    self.resolve(else_block)?;
-                }
-
-                Statement::While { body, .. } => self.resolve(body)?,
             }
+            Statement::Call { callee: _, args } => {
+                for arg in args {
+                    self.maybe_declare_string(arg);
+                }
+            }
+            Statement::Declaration { name, ty, .. } => {
+                let name = name.lexeme(self.source);
+                let ty_lexeme = ty.lexeme(self.source);
+                let ty = match ty_lexeme {
+                    "i32" => ValType::I32,
+                    "i64" => ValType::I64,
+                    "f32" => ValType::F32,
+                    "f64" => ValType::F32,
+                    _ => return self.error(&format!("Unsupported type {ty_lexeme}!")),
+                };
+                let local_idx = self.locals.len();
+                let entry = (local_idx as u32, ty);
+                self.locals.insert(name, entry);
+            }
+
+            Statement::Assignment { .. } => {} // TODO: Complete
+
+            Statement::If {
+                then_block,
+                else_block,
+                ..
+            } => {
+                self.resolve(then_block)?;
+                else_block.as_ref().map(|b| self.resolve(b));
+            }
+
+            Statement::While { body, .. } => self.resolve(body)?,
         }
         Ok(())
     }
@@ -138,7 +141,7 @@ impl<'src> Compiler<'src> {
         let mut locals = self.locals.values().copied().collect::<Vec<_>>();
         locals.sort();
         let mut main_function = Function::new(locals.iter().map(|(_i, ty)| (1, *ty)));
-        self.statements(&mut main_function, &module.statements)?;
+        self.statement(&mut main_function, &module.statement)?;
         main_function.instruction(&Instruction::End);
         self.codes.function(&main_function);
         self.exports
@@ -146,71 +149,73 @@ impl<'src> Compiler<'src> {
         Ok(())
     }
 
-    fn statements(&mut self, func: &mut Function, statements: &[Statement]) -> Result<()> {
-        for stmt in statements {
-            match stmt {
-                Statement::Call { callee, args, .. } => {
-                    let callee_name = callee.lexeme(self.source);
-                    let Some(&callee) = self.fn_indices.get(callee_name) else {
-                        return self.error(&format!("Function '{callee_name}' not found!"));
-                    };
+    fn statement(&mut self, func: &mut Function, statement: &Statement) -> Result<()> {
+        match statement {
+            Statement::Block { statements } => {
+                for statement in statements {
+                    self.statement(func, statement)?;
+                }
+            }
+            Statement::Call { callee, args, .. } => {
+                let callee_name = callee.lexeme(self.source);
+                let Some(&callee) = self.fn_indices.get(callee_name) else {
+                    return self.error(&format!("Function '{callee_name}' not found!"));
+                };
 
-                    match callee_name {
-                        "print" => match args[..] {
-                            [Expression::Literal(Literal::String { token, .. })] => {
-                                let Some(was_str) = self.strings.get(&token) else {
-                                    return self.error("Trying to print a non-existing string!");
-                                };
-                                func.instruction(&Instruction::I32Const(was_str.offset as i32));
-                                func.instruction(&Instruction::I32Const(was_str.len as i32));
-                                func.instruction(&Instruction::Call(callee));
-                            }
-                            _ => return self.error("Incorrect arguments for print!"),
-                        },
-                        "print_num" => {
-                            if args.len() != 1 {
-                                return self.error("Incorrect number of arguments for print_num!");
-                            }
-                            self.expression(func, &args[0])?;
+                match callee_name {
+                    "print" => match args[..] {
+                        [Expression::Literal(Literal::String { token, .. })] => {
+                            let Some(was_str) = self.strings.get(&token) else {
+                                return self.error("Trying to print a non-existing string!");
+                            };
+                            func.instruction(&Instruction::I32Const(was_str.offset as i32));
+                            func.instruction(&Instruction::I32Const(was_str.len as i32));
                             func.instruction(&Instruction::Call(callee));
                         }
-                        _ => return self.error(&format!("Unknown function {callee_name}")),
+                        _ => return self.error("Incorrect arguments for print!"),
+                    },
+                    "print_num" => {
+                        if args.len() != 1 {
+                            return self.error("Incorrect number of arguments for print_num!");
+                        }
+                        self.expression(func, &args[0])?;
+                        func.instruction(&Instruction::Call(callee));
                     }
+                    _ => return self.error(&format!("Unknown function {callee_name}")),
                 }
-                Statement::Declaration { name, value, .. }
-                | Statement::Assignment { name, value } => {
-                    let name = name.lexeme(self.source);
-                    let Some(&(local_idx, _ty)) = self.locals.get(name) else {
-                        return self.error("Undeclared variable");
-                    };
-                    self.expression(func, value)?;
-                    func.instruction(&Instruction::LocalSet(local_idx));
-                }
+            }
+            Statement::Declaration { name, value, .. } | Statement::Assignment { name, value } => {
+                let name = name.lexeme(self.source);
+                let Some(&(local_idx, _ty)) = self.locals.get(name) else {
+                    return self.error("Undeclared variable");
+                };
+                self.expression(func, value)?;
+                func.instruction(&Instruction::LocalSet(local_idx));
+            }
 
-                Statement::If {
-                    condition,
-                    then_block,
-                    else_block,
-                } => {
-                    self.expression(func, condition)?;
-                    func.instruction(&Instruction::If(BlockType::Empty));
-                    self.statements(func, then_block)?;
-                    if !else_block.is_empty() {
-                        func.instruction(&Instruction::Else);
-                        self.statements(func, else_block)?;
-                    }
-                    func.instruction(&Instruction::End);
+            Statement::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
+                self.expression(func, condition)?;
+                func.instruction(&Instruction::If(BlockType::Empty));
+                self.statement(func, then_block)?;
+                if let Some(e) = else_block {
+                    func.instruction(&Instruction::Else);
+                    self.statement(func, e)?;
                 }
+                func.instruction(&Instruction::End);
+            }
 
-                Statement::While { condition, body } => {
-                    func.instruction(&Instruction::Loop(BlockType::Empty));
-                    self.expression(func, condition)?;
-                    func.instruction(&Instruction::If(BlockType::Empty));
-                    self.statements(func, body)?;
-                    func.instruction(&Instruction::Br(1)); // 1 refers to the loop instruction
-                    func.instruction(&Instruction::End); // End of if
-                    func.instruction(&Instruction::End); // End of loop
-                }
+            Statement::While { condition, body } => {
+                func.instruction(&Instruction::Loop(BlockType::Empty));
+                self.expression(func, condition)?;
+                func.instruction(&Instruction::If(BlockType::Empty));
+                self.statement(func, body)?;
+                func.instruction(&Instruction::Br(1)); // 1 refers to the loop instruction
+                func.instruction(&Instruction::End); // End of if
+                func.instruction(&Instruction::End); // End of loop
             }
         }
         Ok(())
@@ -291,7 +296,7 @@ impl<'src> Compiler<'src> {
         let print_idx = self.import_function("js", "print_num", &[ValType::I32], &[]);
         self.fn_indices.insert("print_num", print_idx);
         self.import_memory();
-        self.resolve(&module.statements)?;
+        self.resolve(&module.statement)?;
         self.main(module)?;
 
         let mut wasm_module = wasm_encoder::Module::new();

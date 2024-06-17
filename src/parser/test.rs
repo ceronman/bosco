@@ -10,7 +10,7 @@ trait SExpr {
 
 impl SExpr for Module {
     fn s_expr(&self, src: &str) -> String {
-        format!("(module {})", self.statements.s_expr(src))
+        format!("(module {})", self.statement.s_expr(src))
     }
 }
 
@@ -23,6 +23,9 @@ impl SExpr for Token {
 impl SExpr for Statement {
     fn s_expr(&self, src: &str) -> String {
         match self {
+            Statement::Block { statements } => {
+                format!("({})", statements.s_expr(src))
+            }
             Statement::Call { callee, args } => {
                 format!("(call {} {})", callee.s_expr(src), args.s_expr(src))
             }
@@ -42,7 +45,7 @@ impl SExpr for Statement {
                 else_block,
             } => {
                 format!(
-                    "(if {} ({}) ({}))",
+                    "(if {} {} {})",
                     condition.s_expr(src),
                     then_block.s_expr(src),
                     else_block.s_expr(src)
@@ -103,6 +106,15 @@ impl<T: SExpr> SExpr for Vec<T> {
     }
 }
 
+impl<T: SExpr> SExpr for Option<Box<T>> {
+    fn s_expr(&self, src: &str) -> String {
+        match self {
+            None => "".to_string(),
+            Some(e) => e.s_expr(&src),
+        }
+    }
+}
+
 fn s_expr(src: &str) -> String {
     let program = parse(src).unwrap();
     program.s_expr(src)
@@ -145,6 +157,13 @@ fn parse_chars(expr: &mut Chars<'_>) -> SExpression {
                     break;
                 }
                 let e = parse_chars(expr);
+                while let Some(c) = expr.clone().next() {
+                    if c.is_whitespace() {
+                        expr.next();
+                    } else {
+                        break;
+                    }
+                }
                 elements.push(e);
             }
             match expr.next() {
@@ -187,7 +206,7 @@ macro_rules! test_parser {
 fn test_simple_call() {
     test_parser! {
         "print(\"hello\")",
-        (module (call print "hello"))
+        (module ((call print "hello")))
     }
 }
 
@@ -197,7 +216,7 @@ fn test_simple_call_with_ws() {
         r#"
             print("Hello world")
         "#,
-        (module (call print "Hello world"))
+        (module ((call print "Hello world")))
     }
 }
 
@@ -205,7 +224,7 @@ fn test_simple_call_with_ws() {
 fn test_let_declaration() {
     test_parser! {
         "let a i32 = 1",
-        (module (let a i32 1))
+        (module ((let a i32 1)))
     }
 }
 
@@ -216,7 +235,7 @@ fn test_call_expression() {
             let a i32 = 1
             print(a)
         "#,
-        (module (let a i32 1) (call print a))
+        (module ((let a i32 1) (call print a)))
     }
 }
 
@@ -227,7 +246,7 @@ fn test_assignment() {
             let a i32 = 1
             a = 256
         "#,
-        (module (let a i32 1) (= a 256))
+        (module ((let a i32 1) (= a 256)))
     }
 }
 
@@ -239,8 +258,8 @@ fn test_assignment_binary_expression() {
             let b i32 = a + 10
         "#,
         (module
-            (let a i32 4)
-            (let b i32 (+ a 10)))
+            ((let a i32 4)
+             (let b i32 (+ a 10))))
     }
 }
 
@@ -249,7 +268,7 @@ fn test_associativity() {
     test_parser! {
         "x = a + b + c",
         (module
-            (= x (+ (+ a b) c))
+            ((= x (+ (+ a b) c)))
         )
     }
 }
@@ -259,7 +278,7 @@ fn test_precedence() {
     test_parser! {
         "x = a + b * c + d",
         (module
-            (= x (+ (+ a (* b c)) d))
+            ((= x (+ (+ a (* b c)) d)))
         )
     }
 }
@@ -269,7 +288,7 @@ fn test_grouping() {
     test_parser! {
         "x = (a + b) * (c + d)",
         (module
-            (= x (* (+ a b) (+ c d)))
+            ((= x (* (+ a b) (+ c d))))
         )
     }
 }
@@ -286,10 +305,10 @@ fn test_if_statement() {
             }
         "#,
         (module
-            (if (+ 1 1)
+            ((if (+ 1 1)
                 ((let a i32 1) (call print "true"))
                 ((call print "false"))
-            )
+            ))
         )
     }
 }
@@ -303,10 +322,25 @@ fn test_conditionals() {
             }
         "#,
         (module
-            (if (or (and (> a 2) (< b c)) (and (>= 1 x) (== z 1)))
+            ((if (or (and (> a 2) (< b c)) (and (>= 1 x) (== z 1)))
                 ((call print "true"))
-                ()
-            )
+            ))
         )
+    }
+}
+
+#[test]
+fn test_block() {
+    test_parser! {
+        r#"
+            {
+                print("hello")
+            }
+        "#,
+        (module (
+            (
+                (call print "hello")
+            )
+        ))
     }
 }

@@ -44,11 +44,15 @@ impl<'src> Parser<'src> {
             statements.push(expr);
             self.maybe_eol();
         }
-        Ok(Module { statements })
+        Ok(Module {
+            statement: Statement::Block { statements },
+        })
     }
 
     fn statement(&mut self) -> Result<Statement> {
+        self.maybe_eol();
         match self.token.kind {
+            TokenKind::LBrace => self.block(),
             TokenKind::Let => self.declaration(),
             TokenKind::If => self.if_statement(),
             TokenKind::While => self.while_statement(),
@@ -194,11 +198,12 @@ impl<'src> Parser<'src> {
     fn if_statement(&mut self) -> Result<Statement> {
         self.expect(TokenKind::If)?;
         let condition = self.expression()?;
-        let then_block = self.block()?;
-        let mut else_block = Vec::new();
-        if self.eat(TokenKind::Else) {
-            else_block = self.block()?;
-        }
+        let then_block = Box::new(self.block()?);
+        let else_block = if self.eat(TokenKind::Else) {
+            Some(Box::new(self.block()?))
+        } else {
+            None
+        };
 
         Ok(Statement::If {
             condition,
@@ -207,8 +212,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn block(&mut self) -> Result<Vec<Statement>> {
-        self.maybe_eol();
+    fn block(&mut self) -> Result<Statement> {
         self.expect(TokenKind::LBrace)?;
         self.maybe_eol();
         let mut statements = Vec::new();
@@ -218,14 +222,17 @@ impl<'src> Parser<'src> {
         }
         self.expect(TokenKind::RBrace)?;
         self.maybe_eol();
-        Ok(statements)
+        Ok(Statement::Block { statements })
     }
 
     fn while_statement(&mut self) -> Result<Statement> {
         self.expect(TokenKind::While)?;
         let condition = self.expression()?;
         let body = self.block()?;
-        Ok(Statement::While { condition, body })
+        Ok(Statement::While {
+            condition,
+            body: Box::new(body),
+        })
     }
 
     fn maybe_eol(&mut self) {
