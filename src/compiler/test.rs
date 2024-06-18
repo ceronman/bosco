@@ -167,3 +167,23 @@ fn test_while_loop() {
         "#,
     )
 }
+
+#[test]
+fn test_scopes() {
+    program_test(
+        r#"
+            let x i32 = 1
+            {
+                print_num(x)
+                let x i32 = 2
+                print_num(x)
+            }
+            print_num(x)
+        "#,
+        r#"
+            1
+            2
+            1
+        "#,
+    )
+}
