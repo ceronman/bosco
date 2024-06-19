@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::collections::{HashMap, VecDeque};
 use thiserror::Error;
 
-use crate::ast::{Expression, Literal, Module, Statement};
+use crate::ast::{Expr, ExprKind, Literal, Module, Stmt, StmtKind};
 use wasm_encoder::ValType::I32;
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
@@ -133,21 +133,21 @@ impl<'src> Compiler<'src> {
         Err(CompileError::CompilationError(msg.to_string()).into())
     }
 
-    fn resolve(&mut self, statement: &Statement) -> Result<()> {
-        match statement {
-            Statement::Block { statements } => {
+    fn resolve(&mut self, statement: &Stmt) -> Result<()> {
+        match &statement.kind {
+            StmtKind::Block { statements } => {
                 self.symbol_table.begin_scope();
                 for statement in statements {
                     self.resolve(statement)?
                 }
                 self.symbol_table.end_scope();
             }
-            Statement::Call { callee: _, args } => {
+            StmtKind::Call { callee: _, args } => {
                 for arg in args {
                     self.resolve_expression(arg)?;
                 }
             }
-            Statement::Declaration {
+            StmtKind::Declaration {
                 name,
                 ty: _ty,
                 value,
@@ -157,12 +157,12 @@ impl<'src> Compiler<'src> {
                 self.resolve_expression(value)?;
             }
 
-            Statement::Assignment { name, value } => {
+            StmtKind::Assignment { name, value } => {
                 self.symbol_table.resolve_var(*name)?;
                 self.resolve_expression(value)?;
             }
 
-            Statement::If {
+            StmtKind::If {
                 condition,
                 then_block,
                 else_block,
@@ -172,7 +172,7 @@ impl<'src> Compiler<'src> {
                 else_block.as_ref().map(|b| self.resolve(b));
             }
 
-            Statement::While { condition, body } => {
+            StmtKind::While { condition, body } => {
                 self.resolve_expression(condition)?;
                 self.resolve(body)?
             }
@@ -180,9 +180,9 @@ impl<'src> Compiler<'src> {
         Ok(())
     }
 
-    fn resolve_expression(&mut self, expr: &Expression) -> Result<()> {
-        match expr {
-            Expression::Literal(Literal::String { token, value }) => {
+    fn resolve_expression(&mut self, expr: &Expr) -> Result<()> {
+        match &expr.kind {
+            ExprKind::Literal(Literal::String { token, value }) => {
                 let wasm_str = WasmStr {
                     memory: Compiler::MEM,
                     offset: self.data_offset,
@@ -196,15 +196,15 @@ impl<'src> Compiler<'src> {
                     value.bytes(),
                 );
             }
-            Expression::Literal(_) => {}
-            Expression::Variable { name } => self.symbol_table.resolve_var(*name)?,
-            Expression::Binary { left, right, .. }
-            | Expression::Or { left, right, .. }
-            | Expression::And { left, right, .. } => {
+            ExprKind::Literal(_) => {}
+            ExprKind::Variable { name } => self.symbol_table.resolve_var(*name)?,
+            ExprKind::Binary { left, right, .. }
+            | ExprKind::Or { left, right, .. }
+            | ExprKind::And { left, right, .. } => {
                 self.resolve_expression(left)?;
                 self.resolve_expression(right)?;
             }
-            Expression::Not { right } => self.resolve_expression(right)?,
+            ExprKind::Not { right } => self.resolve_expression(right)?,
         }
         Ok(())
     }
@@ -224,31 +224,36 @@ impl<'src> Compiler<'src> {
         Ok(())
     }
 
-    fn statement(&mut self, func: &mut Function, statement: &Statement) -> Result<()> {
-        match statement {
-            Statement::Block { statements } => {
+    fn statement(&mut self, func: &mut Function, statement: &Stmt) -> Result<()> {
+        match &statement.kind {
+            StmtKind::Block { statements } => {
                 for statement in statements {
                     self.statement(func, statement)?;
                 }
             }
-            Statement::Call { callee, args, .. } => {
+            StmtKind::Call { callee, args, .. } => {
                 let callee_name = callee.span.as_str(self.source);
                 let Some(&callee) = self.fn_indices.get(callee_name) else {
                     return self.error(&format!("Function '{callee_name}' not found!"));
                 };
 
                 match callee_name {
-                    "print" => match args[..] {
-                        [Expression::Literal(Literal::String { token, .. })] => {
+                    "print" => {
+                        if args.len() != 1 {
+                            return self.error("Trying to print a non-existing string!");
+                        }
+                        let arg = &args[0];
+                        if let ExprKind::Literal(Literal::String { token, .. }) = arg.kind {
                             let Some(was_str) = self.strings.get(&token) else {
                                 return self.error("Trying to print a non-existing string!");
                             };
                             func.instruction(&Instruction::I32Const(was_str.offset as i32));
                             func.instruction(&Instruction::I32Const(was_str.len as i32));
                             func.instruction(&Instruction::Call(callee));
+                        } else {
+                            return self.error("Incorrect arguments for print!");
                         }
-                        _ => return self.error("Incorrect arguments for print!"),
-                    },
+                    }
                     "print_num" => {
                         if args.len() != 1 {
                             return self.error("Incorrect number of arguments for print_num!");
@@ -260,13 +265,13 @@ impl<'src> Compiler<'src> {
                 }
             }
 
-            Statement::Declaration { name, value, .. } | Statement::Assignment { name, value } => {
+            StmtKind::Declaration { name, value, .. } | StmtKind::Assignment { name, value } => {
                 let local_idx = self.symbol_table.lookup_var(*name)?;
                 self.expression(func, value)?; // TODO: Define what to do when declared var is used in initializer
                 func.instruction(&Instruction::LocalSet(local_idx));
             }
 
-            Statement::If {
+            StmtKind::If {
                 condition,
                 then_block,
                 else_block,
@@ -281,7 +286,7 @@ impl<'src> Compiler<'src> {
                 func.instruction(&Instruction::End);
             }
 
-            Statement::While { condition, body } => {
+            StmtKind::While { condition, body } => {
                 func.instruction(&Instruction::Loop(BlockType::Empty));
                 self.expression(func, condition)?;
                 func.instruction(&Instruction::If(BlockType::Empty));
@@ -294,15 +299,15 @@ impl<'src> Compiler<'src> {
         Ok(())
     }
 
-    fn expression(&mut self, func: &mut Function, expr: &Expression) -> Result<()> {
-        match expr {
-            Expression::Literal(Literal::Number(value)) => {
+    fn expression(&mut self, func: &mut Function, expr: &Expr) -> Result<()> {
+        match &expr.kind {
+            ExprKind::Literal(Literal::Number(value)) => {
                 func.instruction(&Instruction::I32Const(*value));
             }
-            Expression::Literal(Literal::String { .. }) => {
+            ExprKind::Literal(Literal::String { .. }) => {
                 todo!("Literal strings are not implemented")
             }
-            Expression::Binary {
+            ExprKind::Binary {
                 left,
                 right,
                 operator,
@@ -328,7 +333,7 @@ impl<'src> Compiler<'src> {
                 };
                 func.instruction(&ins);
             }
-            Expression::Or { left, right } => {
+            ExprKind::Or { left, right } => {
                 self.expression(func, left)?;
                 func.instruction(&Instruction::If(BlockType::Result(I32)));
                 func.instruction(&Instruction::I32Const(1));
@@ -336,7 +341,7 @@ impl<'src> Compiler<'src> {
                 self.expression(func, right)?;
                 func.instruction(&Instruction::End);
             }
-            Expression::And { left, right } => {
+            ExprKind::And { left, right } => {
                 self.expression(func, left)?;
                 func.instruction(&Instruction::If(BlockType::Result(I32)));
                 self.expression(func, right)?;
@@ -344,7 +349,7 @@ impl<'src> Compiler<'src> {
                 func.instruction(&Instruction::I32Const(0));
                 func.instruction(&Instruction::End);
             }
-            Expression::Not { right } => {
+            ExprKind::Not { right } => {
                 self.expression(func, right)?;
                 func.instruction(&Instruction::If(BlockType::Result(I32)));
                 func.instruction(&Instruction::I32Const(0));
@@ -352,7 +357,7 @@ impl<'src> Compiler<'src> {
                 func.instruction(&Instruction::I32Const(1));
                 func.instruction(&Instruction::End);
             }
-            Expression::Variable { name } => {
+            ExprKind::Variable { name } => {
                 let index = self.symbol_table.lookup_var(*name)?;
                 func.instruction(&Instruction::LocalGet(index));
             }

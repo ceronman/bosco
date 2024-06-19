@@ -1,4 +1,4 @@
-use crate::ast::{Expression, Literal, Module, Statement};
+use crate::ast::{Expr, ExprKind, Literal, Module, Stmt, StmtKind};
 use crate::lexer::Token;
 use crate::parser::parse;
 use std::fmt::{Debug, Formatter};
@@ -20,26 +20,26 @@ impl SExpr for Token {
     }
 }
 
-impl SExpr for Statement {
+impl SExpr for Stmt {
     fn s_expr(&self, src: &str) -> String {
-        match self {
-            Statement::Block { statements } => {
+        match &self.kind {
+            StmtKind::Block { statements } => {
                 format!("({})", statements.s_expr(src))
             }
-            Statement::Call { callee, args } => {
+            StmtKind::Call { callee, args } => {
                 format!("(call {} {})", callee.s_expr(src), args.s_expr(src))
             }
-            Statement::Declaration { name, ty, value } => format!(
+            StmtKind::Declaration { name, ty, value } => format!(
                 "(let {} {} {})",
                 name.s_expr(src),
                 ty.s_expr(&src),
                 value.s_expr(src)
             ),
-            Statement::Assignment { name, value } => {
+            StmtKind::Assignment { name, value } => {
                 format!("(= {} {})", name.s_expr(src), value.s_expr(src))
             }
 
-            Statement::If {
+            StmtKind::If {
                 condition,
                 then_block,
                 else_block,
@@ -52,19 +52,19 @@ impl SExpr for Statement {
                 )
             }
 
-            Statement::While { condition, body } => {
+            StmtKind::While { condition, body } => {
                 format!("(while {} ({}))", condition.s_expr(src), body.s_expr(src))
             }
         }
     }
 }
 
-impl SExpr for Expression {
+impl SExpr for Expr {
     fn s_expr(&self, src: &str) -> String {
-        match self {
-            Expression::Literal(literal) => literal.s_expr(src),
-            Expression::Variable { name } => format!("{}", name.s_expr(src)),
-            Expression::Binary {
+        match &self.kind {
+            ExprKind::Literal(literal) => literal.s_expr(src),
+            ExprKind::Variable { name } => format!("{}", name.s_expr(src)),
+            ExprKind::Binary {
                 left,
                 right,
                 operator,
@@ -74,13 +74,13 @@ impl SExpr for Expression {
                 left.s_expr(src),
                 right.s_expr(src)
             ),
-            Expression::Or { left, right } => {
+            ExprKind::Or { left, right } => {
                 format!("(or {} {})", left.s_expr(src), right.s_expr(src))
             }
-            Expression::And { left, right } => {
+            ExprKind::And { left, right } => {
                 format!("(and {} {})", left.s_expr(src), right.s_expr(src))
             }
-            Expression::Not { right } => format!("(not {})", right.s_expr(src)),
+            ExprKind::Not { right } => format!("(not {})", right.s_expr(src)),
         }
     }
 }

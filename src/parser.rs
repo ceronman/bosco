@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod test;
 
-use crate::ast::{Expression, Literal, Module, Statement};
+use crate::ast::{Expr, ExprKind, Literal, Module, Node, NodeId, Stmt, StmtKind};
 use crate::lexer::{Lexer, Span, Token, TokenKind};
 use anyhow::Result;
 use thiserror::Error;
@@ -17,6 +17,7 @@ struct Parser<'src> {
     source: &'src str,
     token: Token,
     lexer: Lexer<'src>,
+    id_counter: NodeId,
 }
 
 impl<'src> Parser<'src> {
@@ -26,10 +27,12 @@ impl<'src> Parser<'src> {
             source,
             token: lexer.skip_ws(),
             lexer,
+            id_counter: 0,
         }
     }
 
     fn parse(&mut self) -> Result<Module> {
+        let start = self.token.span;
         let mut statements = Vec::new();
         while self.token.kind != TokenKind::Eof {
             self.maybe_eol();
@@ -37,12 +40,16 @@ impl<'src> Parser<'src> {
             statements.push(expr);
             self.maybe_eol();
         }
+        let end = self.token.span;
         Ok(Module {
-            statement: Statement::Block { statements },
+            statement: Stmt {
+                node: self.node(start, end),
+                kind: StmtKind::Block { statements },
+            },
         })
     }
 
-    fn statement(&mut self) -> Result<Statement> {
+    fn statement(&mut self) -> Result<Stmt> {
         self.maybe_eol();
         match self.token.kind {
             TokenKind::LBrace => self.block(),
@@ -58,7 +65,7 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn expression_precedence(&mut self, min_precedence: u8) -> Result<Expression> {
+    fn expression_precedence(&mut self, min_precedence: u8) -> Result<Expr> {
         // TODO: Generalize?
         let mut left = match self.token.kind {
             TokenKind::LParen => {
@@ -70,8 +77,11 @@ impl<'src> Parser<'src> {
             TokenKind::Not => {
                 self.advance();
                 let right = self.expression_precedence(7)?;
-                Expression::Not {
-                    right: Box::new(right),
+                Expr {
+                    node: self.node(self.token.span, right.node.span),
+                    kind: ExprKind::Not {
+                        right: Box::new(right),
+                    },
                 }
             }
             _ => self.expression_atom()?,
@@ -90,18 +100,27 @@ impl<'src> Parser<'src> {
 
             // TODO: Generalize?
             left = match operator.kind {
-                TokenKind::Or => Expression::Or {
-                    left: Box::new(left),
-                    right: Box::new(right),
+                TokenKind::Or => Expr {
+                    node: self.node(left.node.span, right.node.span),
+                    kind: ExprKind::Or {
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    },
                 },
-                TokenKind::And => Expression::And {
-                    left: Box::new(left),
-                    right: Box::new(right),
+                TokenKind::And => Expr {
+                    node: self.node(left.node.span, right.node.span),
+                    kind: ExprKind::And {
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    },
                 },
-                _ => Expression::Binary {
-                    left: Box::new(left),
-                    right: Box::new(right),
-                    operator,
+                _ => Expr {
+                    node: self.node(left.node.span, right.node.span),
+                    kind: ExprKind::Binary {
+                        left: Box::new(left),
+                        right: Box::new(right),
+                        operator,
+                    },
                 },
             };
         }
@@ -121,7 +140,7 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn expression_atom(&mut self) -> Result<Expression> {
+    fn expression_atom(&mut self) -> Result<Expr> {
         match self.token.kind {
             TokenKind::Str | TokenKind::Number => self.literal(),
             TokenKind::Identifier => self.variable(),
@@ -129,18 +148,18 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn expression(&mut self) -> Result<Expression> {
+    fn expression(&mut self) -> Result<Expr> {
         self.expression_precedence(0)
     }
 
-    fn literal(&mut self) -> Result<Expression> {
+    fn literal(&mut self) -> Result<Expr> {
         let token = self.token;
-        match token.kind {
+        let kind = match token.kind {
             TokenKind::Str => {
                 let lexeme = self.token.span.as_str(self.source);
                 let value = lexeme[1..(lexeme.len() - 1)].to_string(); // TODO: Improve
                 self.advance();
-                Ok(Expression::Literal(Literal::String { token, value }))
+                ExprKind::Literal(Literal::String { token, value })
             }
             TokenKind::Number => {
                 let value = token.span.as_str(self.source);
@@ -149,82 +168,109 @@ impl<'src> Parser<'src> {
                     span: token.span,
                 })?;
                 self.advance();
-                Ok(Expression::Literal(Literal::Number(value)))
+                ExprKind::Literal(Literal::Number(value))
             }
-            _ => self.error(format!("Expected literal, got {:?}", token.kind)),
-        }
-    }
-
-    fn variable(&mut self) -> Result<Expression> {
-        Ok(Expression::Variable {
-            name: self.expect(TokenKind::Identifier)?,
+            _ => return self.error(format!("Expected literal, got {:?}", token.kind)),
+        };
+        Ok(Expr {
+            node: self.node(token.span, token.span),
+            kind,
         })
     }
 
-    fn call(&mut self) -> Result<Statement> {
+    fn variable(&mut self) -> Result<Expr> {
+        let name = self.expect(TokenKind::Identifier)?;
+        Ok(Expr {
+            node: self.node(name.span, name.span),
+            kind: ExprKind::Variable { name },
+        })
+    }
+
+    fn call(&mut self) -> Result<Stmt> {
         let callee = self.expect(TokenKind::Identifier)?;
         self.expect(TokenKind::LParen)?;
         let arg = self.expression()?;
-        self.expect(TokenKind::RParen)?;
-        Ok(Statement::Call {
-            callee,
-            args: vec![arg],
+        let rparen = self.expect(TokenKind::RParen)?;
+        Ok(Stmt {
+            node: self.node(callee.span, rparen.span),
+            kind: StmtKind::Call {
+                callee,
+                args: vec![arg],
+            },
         })
     }
 
-    fn assignment(&mut self) -> Result<Statement> {
+    fn assignment(&mut self) -> Result<Stmt> {
         let name = self.expect(TokenKind::Identifier)?;
         self.expect(TokenKind::Equal)?;
         let value = self.expression()?;
-        Ok(Statement::Assignment { name, value })
+        Ok(Stmt {
+            node: self.node(name.span, value.node.span),
+            kind: StmtKind::Assignment { name, value },
+        })
     }
 
-    fn declaration(&mut self) -> Result<Statement> {
-        self.expect(TokenKind::Let)?;
+    fn declaration(&mut self) -> Result<Stmt> {
+        let let_kw = self.expect(TokenKind::Let)?;
         let name = self.expect(TokenKind::Identifier)?;
         let ty = self.expect(TokenKind::Identifier)?; // TODO: Better error message one missing ty
         self.expect(TokenKind::Equal)?;
         let value = self.expression()?;
-        Ok(Statement::Declaration { name, ty, value })
+        Ok(Stmt {
+            node: self.node(let_kw.span, value.node.span),
+            kind: StmtKind::Declaration { name, ty, value },
+        })
     }
 
-    fn if_statement(&mut self) -> Result<Statement> {
-        self.expect(TokenKind::If)?;
+    fn if_statement(&mut self) -> Result<Stmt> {
+        let if_kw = self.expect(TokenKind::If)?;
         let condition = self.expression()?;
-        let then_block = Box::new(self.block()?);
+        let then_block = self.block()?;
         let else_block = if self.eat(TokenKind::Else) {
-            Some(Box::new(self.block()?))
+            Some(self.block()?)
         } else {
             None
         };
 
-        Ok(Statement::If {
-            condition,
-            then_block,
-            else_block,
+        Ok(Stmt {
+            node: self.node(
+                if_kw.span,
+                else_block.as_ref().unwrap_or(&then_block).node.span,
+            ),
+            kind: StmtKind::If {
+                condition,
+                then_block: Box::new(then_block),
+                else_block: else_block.map(Box::new),
+            },
         })
     }
 
-    fn block(&mut self) -> Result<Statement> {
-        self.expect(TokenKind::LBrace)?;
+    fn block(&mut self) -> Result<Stmt> {
+        let lbrace = self.expect(TokenKind::LBrace)?;
         self.maybe_eol();
         let mut statements = Vec::new();
         while self.token.kind != TokenKind::RBrace {
             statements.push(self.statement()?);
             self.maybe_eol();
         }
-        self.expect(TokenKind::RBrace)?;
+        let rbrace = self.expect(TokenKind::RBrace)?;
         self.maybe_eol();
-        Ok(Statement::Block { statements })
+        Ok(Stmt {
+            node: self.node(lbrace.span, rbrace.span),
+            kind: StmtKind::Block { statements },
+        })
     }
 
-    fn while_statement(&mut self) -> Result<Statement> {
-        self.expect(TokenKind::While)?;
+    fn while_statement(&mut self) -> Result<Stmt> {
+        let while_kw = self.expect(TokenKind::While)?;
         let condition = self.expression()?;
         let body = self.block()?;
-        Ok(Statement::While {
-            condition,
-            body: Box::new(body),
+        Ok(Stmt {
+            node: self.node(while_kw.span, body.node.span),
+            kind: StmtKind::While {
+                condition,
+                body: Box::new(body),
+            },
         })
     }
 
@@ -268,6 +314,15 @@ impl<'src> Parser<'src> {
             span: self.token.span,
         }
         .into())
+    }
+
+    fn node(&mut self, start: Span, end: Span) -> Node {
+        let result = Node {
+            _id: self.id_counter,
+            span: Span(start.0, end.1),
+        };
+        self.id_counter += 1;
+        result
     }
 }
 

@@ -1,60 +1,80 @@
-use crate::lexer::Token;
+use crate::lexer::{Span, Token};
 
-#[derive(Debug)]
-pub struct Module {
-    pub statement: Statement,
+pub type NodeId = u32;
+
+#[derive(Copy, Clone, Debug)]
+pub struct Node {
+    pub _id: NodeId,
+    pub span: Span,
 }
 
 #[derive(Debug)]
-pub enum Statement {
+pub struct Module {
+    pub statement: Stmt,
+}
+
+#[derive(Debug)]
+pub struct Stmt {
+    pub node: Node,
+    pub kind: StmtKind,
+}
+
+#[derive(Debug)]
+pub enum StmtKind {
     Block {
-        statements: Vec<Statement>,
+        statements: Vec<Stmt>,
     },
     Call {
         callee: Token,
-        args: Vec<Expression>,
+        args: Vec<Expr>,
     },
     Declaration {
         name: Token,
         ty: Token,
-        value: Expression, // TODO: Support optional values
+        value: Expr, // TODO: Support optional values
     },
     Assignment {
         name: Token,
-        value: Expression,
+        value: Expr,
     },
     If {
-        condition: Expression,
-        then_block: Box<Statement>,
-        else_block: Option<Box<Statement>>,
+        condition: Expr,
+        then_block: Box<Stmt>,
+        else_block: Option<Box<Stmt>>,
     },
     While {
-        condition: Expression,
-        body: Box<Statement>,
+        condition: Expr,
+        body: Box<Stmt>,
     },
 }
 
 #[derive(Debug)]
-pub enum Expression {
+pub struct Expr {
+    pub node: Node,
+    pub kind: ExprKind,
+}
+
+#[derive(Debug)]
+pub enum ExprKind {
     Literal(Literal),
     Variable {
         name: Token,
     },
     Binary {
-        left: Box<Expression>,
-        right: Box<Expression>,
+        left: Box<Expr>,
+        right: Box<Expr>,
         operator: Token,
     },
     Or {
-        left: Box<Expression>,
-        right: Box<Expression>,
+        left: Box<Expr>,
+        right: Box<Expr>,
     },
     And {
-        left: Box<Expression>,
-        right: Box<Expression>,
+        left: Box<Expr>,
+        right: Box<Expr>,
     },
     Not {
-        right: Box<Expression>,
+        right: Box<Expr>,
     },
 }
 
