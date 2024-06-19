@@ -53,7 +53,7 @@ impl<'src> SymbolTable<'src> {
 
     fn declare(&mut self, token: Token) -> Result<u32> {
         let index: u32 = self.locals.len().try_into()?;
-        let name = token.lexeme(self.source);
+        let name = token.span.as_str(self.source);
         let Some(env) = self.environments.front_mut() else {
             return Err(CompileError::CompilationError("There are no scopes".into()).into());
         };
@@ -69,7 +69,7 @@ impl<'src> SymbolTable<'src> {
     }
 
     fn resolve_var(&mut self, token: Token) -> Result<()> {
-        let name = token.lexeme(self.source);
+        let name = token.span.as_str(self.source);
         for env in &self.environments {
             if let Some(&index) = env.get(name) {
                 self.locals.insert(token, index);
@@ -80,7 +80,7 @@ impl<'src> SymbolTable<'src> {
     }
 
     fn lookup_var(&self, token: Token) -> Result<u32> {
-        let name = token.lexeme(self.source);
+        let name = token.span.as_str(self.source);
         self.locals
             .get(&token)
             .ok_or(CompileError::CompilationError(format!("Undeclared variable {name}")).into())
@@ -232,7 +232,7 @@ impl<'src> Compiler<'src> {
                 }
             }
             Statement::Call { callee, args, .. } => {
-                let callee_name = callee.lexeme(self.source);
+                let callee_name = callee.span.as_str(self.source);
                 let Some(&callee) = self.fn_indices.get(callee_name) else {
                     return self.error(&format!("Function '{callee_name}' not found!"));
                 };

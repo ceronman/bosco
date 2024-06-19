@@ -2,22 +2,15 @@
 mod test;
 
 use crate::ast::{Expression, Literal, Module, Statement};
-use crate::lexer::{Lexer, Token, TokenKind};
+use crate::lexer::{Lexer, Span, Token, TokenKind};
 use anyhow::Result;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-#[error("Parse Error: {msg} at {start}..{end}")]
+#[error("Parse Error: {msg} at {span:?}")]
 pub struct ParseError {
     pub msg: String,
-    pub start: usize,
-    pub end: usize,
-}
-
-impl Token {
-    pub fn lexeme(self, source: &str) -> &str {
-        &source[self.start..self.end]
-    }
+    pub span: Span,
 }
 
 struct Parser<'src> {
@@ -144,16 +137,16 @@ impl<'src> Parser<'src> {
         let token = self.token;
         match token.kind {
             TokenKind::Str => {
-                let value = self.source[(token.start + 1)..(token.end - 1)].to_string();
+                let lexeme = self.token.span.as_str(self.source);
+                let value = lexeme[1..(lexeme.len() - 1)].to_string(); // TODO: Improve
                 self.advance();
                 Ok(Expression::Literal(Literal::String { token, value }))
             }
             TokenKind::Number => {
-                let value = token.lexeme(self.source);
+                let value = token.span.as_str(self.source);
                 let value: i32 = value.parse().map_err(|e| ParseError {
                     msg: format!("Unable to parse number {value}: {e}"),
-                    start: token.start,
-                    end: token.end,
+                    span: token.span,
                 })?;
                 self.advance();
                 Ok(Expression::Literal(Literal::Number(value)))
@@ -272,8 +265,7 @@ impl<'src> Parser<'src> {
     fn error<T>(&self, msg: String) -> Result<T> {
         Err(ParseError {
             msg,
-            start: self.token.start,
-            end: self.token.end,
+            span: self.token.span,
         }
         .into())
     }

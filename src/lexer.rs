@@ -56,12 +56,20 @@ pub enum TokenKind {
     Eof,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub struct Span(pub usize, pub usize);
+
+impl Span {
+    pub fn as_str(self, content: &str) -> &str {
+        &content[self.0..self.1]
+    }
+}
+
 // TODO: Re-think the need for Hash
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Token {
     pub kind: TokenKind,
-    pub start: usize,
-    pub end: usize,
+    pub span: Span,
 }
 
 #[derive(Clone)]
@@ -88,8 +96,7 @@ impl<'src> Lexer<'src> {
 
         Token {
             kind: self.token_kind(c),
-            start: self.start,
-            end: self.offset,
+            span: Span(self.start, self.offset),
         }
     }
 

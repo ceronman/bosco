@@ -23,7 +23,7 @@ fn test_lexer(code: &str, expected: Vec<TokenKind>, skip_ws: bool) {
 
     let text = tokens
         .into_iter()
-        .map(|token| &code[token.start..token.end])
+        .map(|token| token.span.as_str(code))
         .fold(String::new(), |a, b| a + b);
 
     assert_eq!(text.as_str(), code);

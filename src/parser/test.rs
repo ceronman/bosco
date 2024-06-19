@@ -16,7 +16,7 @@ impl SExpr for Module {
 
 impl SExpr for Token {
     fn s_expr(&self, src: &str) -> String {
-        src[self.start..self.end].into()
+        self.span.as_str(src).into()
     }
 }
 
