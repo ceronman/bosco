@@ -187,3 +187,39 @@ fn test_scopes() {
         "#,
     )
 }
+
+fn assert_error(source: &str, expected: &str) {
+    match compile(source) {
+        Ok(_) => panic!("No error returned"),
+        Err(e) => {
+            assert_eq!(format!("{e}"), expected)
+        }
+    }
+}
+
+#[test]
+fn test_errors() {
+    assert_error(
+        "print()",
+        "Compilation Error: The 'print' function requires one argument at Span(0, 7)",
+    );
+    assert_error(
+        "print(",
+        "Parse Error: Expected expression, got Eof at Span(6, 6)",
+    );
+    assert_error(
+        "x = 1",
+        "Compilation Error: Undeclared variable 'x' at Span(0, 1)",
+    );
+    assert_error(
+        r#"
+        let x i32 = 1
+        let x i32 = 2
+    "#,
+        "Compilation Error: Variable 'x' was already declared in this scope at Span(35, 36)",
+    );
+    assert_error(
+        "let x = 1",
+        "Parse Error: Expected variable type, got Equal at Span(6, 7)",
+    );
+}

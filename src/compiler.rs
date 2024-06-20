@@ -1,16 +1,16 @@
-use anyhow::Result;
 use std::collections::{HashMap, VecDeque};
-use thiserror::Error;
 
-use crate::ast::{Expr, ExprKind, Literal, Module, Stmt, StmtKind};
+use anyhow::Result;
+use thiserror::Error;
 use wasm_encoder::ValType::I32;
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
     Function, FunctionSection, ImportSection, Instruction, MemoryType, TypeSection, ValType,
 };
 
-use crate::lexer::{Token, TokenKind};
-use crate::parser::{parse, ParseError};
+use crate::ast::{Expr, ExprKind, Literal, Module, Stmt, StmtKind};
+use crate::lexer::{Span, Token, TokenKind};
+use crate::parser::parse;
 
 #[cfg(test)]
 mod test;
@@ -23,17 +23,10 @@ struct WasmStr {
 }
 
 #[derive(Error, Debug)]
-pub enum CompileError {
-    #[error("{0}")]
-    ParseError(ParseError),
-    #[error("Compilation error: {0}")]
-    CompilationError(String), // TODO: Add proper positions to the errors
-}
-
-impl From<ParseError> for CompileError {
-    fn from(value: ParseError) -> Self {
-        CompileError::ParseError(value)
-    }
+#[error("Compilation Error: {message} at {span:?}")]
+pub struct CompileError {
+    message: String,
+    span: Span,
 }
 
 struct SymbolTable<'src> {
@@ -55,13 +48,18 @@ impl<'src> SymbolTable<'src> {
         let index: u32 = self.locals.len().try_into()?;
         let name = token.span.as_str(self.source);
         let Some(env) = self.environments.front_mut() else {
-            return Err(CompileError::CompilationError("There are no scopes".into()).into());
+            return Err(CompileError {
+                message: format!("Variable '{name}' was declared outside of any scope"),
+                span: token.span,
+            }
+            .into());
         };
 
         if env.contains_key(name) {
-            return Err(CompileError::CompilationError(format!(
-                "Variable {name} is already declared!"
-            ))
+            return Err(CompileError {
+                message: format!("Variable '{name}' was already declared in this scope"),
+                span: token.span,
+            }
             .into());
         }
         env.insert(name.into(), index);
@@ -76,14 +74,24 @@ impl<'src> SymbolTable<'src> {
                 return Ok(());
             }
         }
-        Err(CompileError::CompilationError(format!("Unable to resolve variable {name}")).into())
+        Err(CompileError {
+            message: format!("Undeclared variable '{name}'"),
+            span: token.span,
+        }
+        .into())
     }
 
     fn lookup_var(&self, token: Token) -> Result<u32> {
         let name = token.span.as_str(self.source);
         self.locals
             .get(&token)
-            .ok_or(CompileError::CompilationError(format!("Undeclared variable {name}")).into())
+            .ok_or(
+                CompileError {
+                    message: format!("Undeclared variable '{name}'"),
+                    span: token.span,
+                }
+                .into(),
+            )
             .copied()
     }
 
@@ -129,8 +137,12 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn error<T>(&self, msg: &str) -> Result<T> {
-        Err(CompileError::CompilationError(msg.to_string()).into())
+    fn error<T>(&self, msg: impl Into<String>, span: Span) -> Result<T> {
+        Err(CompileError {
+            message: msg.into(),
+            span,
+        }
+        .into())
     }
 
     fn resolve(&mut self, statement: &Stmt) -> Result<()> {
@@ -224,8 +236,8 @@ impl<'src> Compiler<'src> {
         Ok(())
     }
 
-    fn statement(&mut self, func: &mut Function, statement: &Stmt) -> Result<()> {
-        match &statement.kind {
+    fn statement(&mut self, func: &mut Function, stmt: &Stmt) -> Result<()> {
+        match &stmt.kind {
             StmtKind::Block { statements } => {
                 for statement in statements {
                     self.statement(func, statement)?;
@@ -234,34 +246,46 @@ impl<'src> Compiler<'src> {
             StmtKind::Call { callee, args, .. } => {
                 let callee_name = callee.span.as_str(self.source);
                 let Some(&callee) = self.fn_indices.get(callee_name) else {
-                    return self.error(&format!("Function '{callee_name}' not found!"));
+                    return self.error(
+                        format!("Function '{callee_name}' not found!"),
+                        stmt.node.span,
+                    );
                 };
 
                 match callee_name {
                     "print" => {
                         if args.len() != 1 {
-                            return self.error("Trying to print a non-existing string!");
+                            return self.error(
+                                "The 'print' function requires one argument",
+                                stmt.node.span,
+                            );
                         }
                         let arg = &args[0];
                         if let ExprKind::Literal(Literal::String { token, .. }) = arg.kind {
                             let Some(was_str) = self.strings.get(&token) else {
-                                return self.error("Trying to print a non-existing string!");
+                                return self.error("String constant not found", token.span);
                             };
                             func.instruction(&Instruction::I32Const(was_str.offset as i32));
                             func.instruction(&Instruction::I32Const(was_str.len as i32));
                             func.instruction(&Instruction::Call(callee));
                         } else {
-                            return self.error("Incorrect arguments for print!");
+                            return self.error("Incorrect arguments for 'print'!", stmt.node.span);
                         }
                     }
                     "print_num" => {
                         if args.len() != 1 {
-                            return self.error("Incorrect number of arguments for print_num!");
+                            return self.error(
+                                "The 'print_num' function requires one argument",
+                                stmt.node.span,
+                            );
                         }
                         self.expression(func, &args[0])?;
                         func.instruction(&Instruction::Call(callee));
                     }
-                    _ => return self.error(&format!("Unknown function {callee_name}")),
+                    _ => {
+                        return self
+                            .error(format!("Unknown function '{callee_name}'"), stmt.node.span)
+                    }
                 }
             }
 
@@ -329,7 +353,12 @@ impl<'src> Compiler<'src> {
                     TokenKind::Star => Instruction::I32Mul,
                     TokenKind::Slash => Instruction::I32DivS,
                     TokenKind::Percent => Instruction::I32RemS,
-                    _ => return self.error(&format!("Unsupported operant {:?}", operator.kind)),
+                    _ => {
+                        return self.error(
+                            format!("Unsupported operant '{:?}'", operator.kind),
+                            operator.span,
+                        )
+                    }
                 };
                 func.instruction(&ins);
             }

@@ -189,15 +189,20 @@ impl<'src> Parser<'src> {
     fn call(&mut self) -> Result<Stmt> {
         let callee = self.expect(TokenKind::Identifier)?;
         self.expect(TokenKind::LParen)?;
-        let arg = self.expression()?;
+        let args = self.arguments()?;
         let rparen = self.expect(TokenKind::RParen)?;
         Ok(Stmt {
             node: self.node(callee.span, rparen.span),
-            kind: StmtKind::Call {
-                callee,
-                args: vec![arg],
-            },
+            kind: StmtKind::Call { callee, args },
         })
+    }
+
+    fn arguments(&mut self) -> Result<Vec<Expr>> {
+        if self.token.kind == TokenKind::RParen {
+            Ok(vec![])
+        } else {
+            Ok(vec![self.expression()?])
+        }
     }
 
     fn assignment(&mut self) -> Result<Stmt> {
@@ -213,7 +218,9 @@ impl<'src> Parser<'src> {
     fn declaration(&mut self) -> Result<Stmt> {
         let let_kw = self.expect(TokenKind::Let)?;
         let name = self.expect(TokenKind::Identifier)?;
-        let ty = self.expect(TokenKind::Identifier)?; // TODO: Better error message one missing ty
+        let ty = self.expect_msg(TokenKind::Identifier, |token| {
+            format!("Expected variable type, got {:?}", token.kind)
+        })?;
         self.expect(TokenKind::Equal)?;
         let value = self.expression()?;
         Ok(Stmt {
@@ -296,16 +303,23 @@ impl<'src> Parser<'src> {
     }
 
     fn expect(&mut self, token_kind: TokenKind) -> Result<Token> {
+        self.expect_msg(token_kind, |token| {
+            format!("Expected token {:?}, got {:?}", token_kind, token.kind)
+        })
+    }
+
+    fn expect_msg(
+        &mut self,
+        token_kind: TokenKind,
+        msg: impl Fn(Token) -> String,
+    ) -> Result<Token> {
         let token = self.token;
         if token.kind == token_kind {
             self.token = self.lexer.skip_ws();
             return Ok(token);
         }
 
-        self.error(format!(
-            "Expected token {:?}, got {:?}",
-            token_kind, token.kind
-        ))
+        self.error(msg(token))
     }
 
     fn error<T>(&self, msg: String) -> Result<T> {
