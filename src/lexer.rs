@@ -36,7 +36,8 @@ pub enum TokenKind {
     True,
     False,
 
-    Number,
+    Int,
+    Float,
     Identifier,
     Str,
 
@@ -194,10 +195,18 @@ impl<'src> Lexer<'src> {
     }
 
     fn number(&mut self) -> TokenKind {
-        while let Some('0'..='9' | '_') = self.peek() {
+        while let Some('0'..='9') = self.peek() {
             self.eat();
         }
-        TokenKind::Number
+        if let Some('.') = self.peek() {
+            self.eat();
+            while let Some('0'..='9') = self.peek() {
+                self.eat();
+            }
+            TokenKind::Float
+        } else {
+            TokenKind::Int
+        }
     }
 
     fn string(&mut self) -> TokenKind {

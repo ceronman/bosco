@@ -142,7 +142,7 @@ impl<'src> Parser<'src> {
 
     fn expression_atom(&mut self) -> Result<Expr> {
         match self.token.kind {
-            TokenKind::Str | TokenKind::IntLiteral => self.literal(),
+            TokenKind::Str | TokenKind::Int => self.literal(),
             TokenKind::Identifier => self.variable(),
             other_kind => self.error(format!("Expected expression, got {other_kind:?}")),
         }
@@ -161,7 +161,7 @@ impl<'src> Parser<'src> {
                 self.advance();
                 ExprKind::Literal(Literal::String { token, value })
             }
-            TokenKind::IntLiteral => {
+            TokenKind::Int => {
                 let value = token.span.as_str(self.source);
                 let value: i32 = value.parse().map_err(|e| ParseError {
                     msg: format!("Unable to parse number {value}: {e}"),
