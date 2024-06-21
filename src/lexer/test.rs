@@ -36,8 +36,8 @@ fn operators() {
 #[test]
 fn numbers() {
     test_lexer(
-        "123 0 00123 123_345",
-        vec![Number, Number, Number, Number],
+        "123 0 00123",
+        vec![IntLiteral, IntLiteral, IntLiteral],
         true,
     );
 }
@@ -130,7 +130,7 @@ fn block_comment_unterminated() {
 fn let_declaration() {
     test_lexer(
         r#" let foo = 1"#,
-        vec![Let, Identifier, Equal, Number],
+        vec![Let, Identifier, Equal, IntLiteral],
         true,
     );
 }
@@ -162,8 +162,8 @@ fn arithmetic_expressions() {
             let x = (a + b) - (a + c)
         "#,
         vec![
-            Eol, Let, Identifier, Equal, Number, Eol, Let, Identifier, Equal, Number, Eol, Let,
-            Identifier, Equal, Number, Eol, Let, Identifier, Equal, LParen, Identifier, Plus,
+            Eol, Let, Identifier, Equal, IntLiteral, Eol, Let, Identifier, Equal, IntLiteral, Eol, Let,
+            Identifier, Equal, IntLiteral, Eol, Let, Identifier, Equal, LParen, Identifier, Plus,
             Identifier, RParen, Minus, LParen, Identifier, Plus, Identifier, RParen, Eol,
         ],
         true,
