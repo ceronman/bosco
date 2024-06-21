@@ -83,7 +83,7 @@ fn test_hello_world() {
 fn test_declaration_assignment() {
     program_test(
         r#"
-            let a i32 = 1
+            let a int = 1
             print_num(a)
             a = 64
             print_num(a)
@@ -99,13 +99,13 @@ fn test_declaration_assignment() {
 fn test_expressions() {
     program_test(
         r#"
-            let a i32 = 1
-            let b i32 = 2
-            let c i32 = a + b * 2 + 4
+            let a int = 1
+            let b int = 2
+            let c int = a + b * 2 + 4
             print_num(c)
-            let d i32 = a + b * c / 5 % 2
+            let d int = a + b * c / 5 % 2
             print_num(d)
-            let e i32 = (a + b) * (c - d)
+            let e int = (a + b) * (c - d)
             print_num(e)
         "#,
         r#"
@@ -120,8 +120,8 @@ fn test_expressions() {
 fn test_if_statement() {
     program_test(
         r#"
-            let a i32 = 1
-            let b i32 = 2
+            let a int = 1
+            let b int = 2
             if a > b {
                 print("first")
             } else {
@@ -150,7 +150,7 @@ fn test_if_statement() {
 fn test_while_loop() {
     program_test(
         r#"
-            let x i32 = 5
+            let x int = 5
             while x > 0 {
                 print_num(x)
                 x = x - 1
@@ -172,10 +172,10 @@ fn test_while_loop() {
 fn test_scopes() {
     program_test(
         r#"
-            let x i32 = 1
+            let x int = 1
             {
                 print_num(x)
-                let x i32 = 2
+                let x int = 2
                 print_num(x)
             }
             print_num(x)
@@ -213,13 +213,46 @@ fn test_errors() {
     );
     assert_error(
         r#"
-        let x i32 = 1
-        let x i32 = 2
+        let x int = 1
+        let x int = 2
     "#,
         "Compilation Error: Variable 'x' was already declared in this scope at Span(35, 36)",
     );
     assert_error(
         "let x = 1",
         "Parse Error: Expected variable type, got Equal at Span(6, 7)",
+    );
+}
+
+#[test]
+fn test_type_errors() {
+    assert_error(
+        "let x float = 1",
+        "Compilation Error: Type Error: expected Float but found Int at Span(14, 15)",
+    );
+    assert_error(
+        r#"
+            let x int = 1
+            let y float = x
+        "#,
+        "Compilation Error: Type Error: expected Float but found Int at Span(53, 54)",
+    );
+    assert_error(
+        r#"
+            let x int = 1
+            let y float = 1.5
+            let z int = x + y
+        "#,
+        "Compilation Error: Type Error: incompatible types Int and Float at Span(81, 86)",
+    );
+
+    assert_error(
+        r#"
+            let x int = 1
+            if 2 > 1 {
+                x = 1.5
+            }
+        "#,
+        "Compilation Error: Type Error: expected Int but found Float at Span(70, 73)",
     );
 }

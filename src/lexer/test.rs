@@ -128,11 +128,7 @@ fn block_comment_unterminated() {
 
 #[test]
 fn let_declaration() {
-    test_lexer(
-        r#" let foo = 1"#,
-        vec![Let, Identifier, Equal, Int],
-        true,
-    );
+    test_lexer(r#" let foo = 1"#, vec![Let, Identifier, Equal, Int], true);
 }
 
 #[test]

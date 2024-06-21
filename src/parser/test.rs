@@ -88,7 +88,8 @@ impl SExpr for Expr {
 impl SExpr for Literal {
     fn s_expr(&self, _src: &str) -> String {
         match self {
-            Literal::Number(value) => format!("{value}"),
+            Literal::Int(value) => format!("{value}"),
+            Literal::Float(value) => format!("{value}"),
             Literal::String { value, .. } => format!("\"{value}\""),
         }
     }
@@ -223,8 +224,8 @@ fn test_simple_call_with_ws() {
 #[test]
 fn test_let_declaration() {
     test_parser! {
-        "let a i32 = 1",
-        (module ((let a i32 1)))
+        "let a int = 1",
+        (module ((let a int 1)))
     }
 }
 
@@ -232,10 +233,10 @@ fn test_let_declaration() {
 fn test_call_expression() {
     test_parser! {
         r#"
-            let a i32 = 1
+            let a int = 1
             print(a)
         "#,
-        (module ((let a i32 1) (call print a)))
+        (module ((let a int 1) (call print a)))
     }
 }
 
@@ -243,10 +244,10 @@ fn test_call_expression() {
 fn test_assignment() {
     test_parser! {
         r#"
-            let a i32 = 1
+            let a int = 1
             a = 256
         "#,
-        (module ((let a i32 1) (= a 256)))
+        (module ((let a int 1) (= a 256)))
     }
 }
 
@@ -254,12 +255,12 @@ fn test_assignment() {
 fn test_assignment_binary_expression() {
     test_parser! {
         r#"
-            let a i32 = 4
-            let b i32 = a + 10
+            let a int = 4
+            let b int = a + 10
         "#,
         (module
-            ((let a i32 4)
-             (let b i32 (+ a 10))))
+            ((let a int 4)
+             (let b int (+ a 10))))
     }
 }
 
@@ -298,7 +299,7 @@ fn test_if_statement() {
     test_parser! {
         r#"
             if 1 + 1 {
-                let a i32 = 1
+                let a int = 1
                 print("true")
             } else {
                 print("false")
@@ -306,7 +307,7 @@ fn test_if_statement() {
         "#,
         (module
             ((if (+ 1 1)
-                ((let a i32 1) (call print "true"))
+                ((let a int 1) (call print "true"))
                 ((call print "false"))
             ))
         )

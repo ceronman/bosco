@@ -30,25 +30,17 @@ pub struct CompileError {
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum Ty {
-    I32,
-    U32,
-    I64,
-    U64,
-    F32,
-    F64,
+    Int,
+    Float,
 }
 
 impl Ty {
     // TODO: This should probably be at the parser level
     fn from_lexeme(lexeme: &str) -> Option<Ty> {
         match lexeme {
-            "i32" => Some(Ty::I32),
-            "u32" => Some(Ty::U32),
-            "i64" => Some(Ty::I64),
-            "u64" => Some(Ty::U64),
-            "f32" => Some(Ty::F32),
-            "f64" => Some(Ty::F64),
-            _ => None
+            "int" => Some(Ty::Int),
+            "float" => Some(Ty::Float),
+            _ => None,
         }
     }
 }
@@ -56,7 +48,7 @@ impl Ty {
 #[derive(Copy, Clone, Debug)]
 struct LocalVar {
     index: u32,
-    ty: Ty
+    ty: Ty,
 }
 
 struct SymbolTable<'src> {
@@ -94,14 +86,13 @@ impl<'src> SymbolTable<'src> {
         }
         let ty_name = ty_token.span.as_str(self.source);
         let Some(ty) = Ty::from_lexeme(ty_name) else {
-            return Err(
-                CompileError {
-                    message: format!("Unknown type {ty_name}"),
-                    span: ty_token.span
-                }.into()
-            )
+            return Err(CompileError {
+                message: format!("Unknown type {ty_name}"),
+                span: ty_token.span,
+            }
+            .into());
         };
-        let local_var = LocalVar { index, ty};
+        let local_var = LocalVar { index, ty };
         env.insert(name.into(), local_var);
         self.locals.insert(*name_token, local_var);
         Ok(index)
@@ -125,7 +116,7 @@ impl<'src> SymbolTable<'src> {
     fn lookup_var(&self, token: &Token) -> Result<LocalVar> {
         let name = token.span.as_str(self.source);
         self.locals
-            .get(&token)
+            .get(token)
             .ok_or(
                 CompileError {
                     message: format!("Undeclared variable '{name}'"),
@@ -200,11 +191,7 @@ impl<'src> Compiler<'src> {
                     self.resolve_expression(arg)?;
                 }
             }
-            StmtKind::Declaration {
-                name,
-                ty,
-                value,
-            } => {
+            StmtKind::Declaration { name, ty, value } => {
                 self.symbol_table.declare(name, ty)?;
                 self.resolve_expression(value)?;
             }
@@ -271,18 +258,21 @@ impl<'src> Compiler<'src> {
             StmtKind::Call { .. } => {
                 // TODO: We still don't have proper support for calls, so nothing to do.
             }
-            StmtKind::Declaration { name, value , ..}
-            | StmtKind::Assignment { name, value } => {
-                let initializer_ty =  self.type_check_expr(value)?;
+            StmtKind::Declaration { name, value, .. } | StmtKind::Assignment { name, value } => {
+                let initializer_ty = self.type_check_expr(value)?;
                 let var_ty = self.symbol_table.lookup_var(name)?.ty;
                 if initializer_ty != var_ty {
                     return self.error(
                         format!("Type Error: expected {var_ty:?} but found {initializer_ty:?}"),
-                        value.node.span
-                    )
+                        value.node.span,
+                    );
                 }
             }
-            StmtKind::If { condition, then_block, else_block } => {
+            StmtKind::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
                 self.type_check_expr(condition)?; // TODO: Introduce boolean types
                 self.type_check(then_block)?;
                 if let Some(e) = else_block {
@@ -299,14 +289,29 @@ impl<'src> Compiler<'src> {
 
     fn type_check_expr(&mut self, expr: &Expr) -> Result<Ty> {
         match &expr.kind {
-            ExprKind::Literal(_) => {}
-            ExprKind::Variable { .. } => {}
-            ExprKind::Binary { .. } => {}
-            ExprKind::Or { .. } => {}
-            ExprKind::And { .. } => {}
-            ExprKind::Not { .. } => {}
+            ExprKind::Literal(Literal::Int(_)) => Ok(Ty::Int),
+            ExprKind::Literal(Literal::Float(_)) => Ok(Ty::Float),
+            ExprKind::Literal(Literal::String { .. }) => todo!(),
+            ExprKind::Variable { name } => {
+                let local_var = self.symbol_table.lookup_var(name)?;
+                Ok(local_var.ty)
+            }
+            ExprKind::Binary { left, right, .. }
+            | ExprKind::Or { left, right }
+            | ExprKind::And { left, right } => {
+                let left_ty = self.type_check_expr(left)?;
+                let right_ty = self.type_check_expr(right)?;
+                if left_ty != right_ty {
+                    self.error(
+                        format!("Type Error: incompatible types {left_ty:?} and {right_ty:?}"),
+                        expr.node.span,
+                    )
+                } else {
+                    Ok(left_ty)
+                }
+            }
+            ExprKind::Not { right } => self.type_check_expr(right),
         }
-        Ok(Ty::I32)
     }
 
     fn main(&mut self, module: &Module) -> Result<()> {
@@ -413,8 +418,11 @@ impl<'src> Compiler<'src> {
 
     fn expression(&mut self, func: &mut Function, expr: &Expr) -> Result<()> {
         match &expr.kind {
-            ExprKind::Literal(Literal::Number(value)) => {
+            ExprKind::Literal(Literal::Int(value)) => {
                 func.instruction(&Instruction::I32Const(*value));
+            }
+            ExprKind::Literal(Literal::Float(value)) => {
+                func.instruction(&Instruction::F64Const(*value));
             }
             ExprKind::Literal(Literal::String { .. }) => {
                 todo!("Literal strings are not implemented")
@@ -491,6 +499,7 @@ impl<'src> Compiler<'src> {
         self.symbol_table.begin_scope();
         self.resolve(&module.statement)?;
         self.symbol_table.end_scope();
+        self.type_check(&module.statement)?;
         self.main(module)?;
 
         let mut wasm_module = wasm_encoder::Module::new();

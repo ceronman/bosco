@@ -80,6 +80,7 @@ pub enum ExprKind {
 
 #[derive(Debug)]
 pub enum Literal {
-    Number(i32),
+    Int(i32),
+    Float(f64),
     String { token: Token, value: String },
 }
