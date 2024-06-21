@@ -2,7 +2,6 @@ use std::collections::{HashMap, VecDeque};
 
 use anyhow::Result;
 use thiserror::Error;
-use wasm_encoder::ValType::I32;
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
     Function, FunctionSection, ImportSection, Instruction, MemoryType, TypeSection, ValType,
@@ -29,10 +28,41 @@ pub struct CompileError {
     span: Span,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum Ty {
+    I32,
+    U32,
+    I64,
+    U64,
+    F32,
+    F64,
+}
+
+impl Ty {
+    // TODO: This should probably be at the parser level
+    fn from_lexeme(lexeme: &str) -> Option<Ty> {
+        match lexeme {
+            "i32" => Some(Ty::I32),
+            "u32" => Some(Ty::U32),
+            "i64" => Some(Ty::I64),
+            "u64" => Some(Ty::U64),
+            "f32" => Some(Ty::F32),
+            "f64" => Some(Ty::F64),
+            _ => None
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+struct LocalVar {
+    index: u32,
+    ty: Ty
+}
+
 struct SymbolTable<'src> {
     source: &'src str,
-    environments: VecDeque<HashMap<String, u32>>, // TODO: Use interned strings instead
-    locals: HashMap<Token, u32>,
+    environments: VecDeque<HashMap<String, LocalVar>>, // TODO: Use interned strings instead
+    locals: HashMap<Token, LocalVar>,
 }
 
 impl<'src> SymbolTable<'src> {
@@ -44,13 +74,13 @@ impl<'src> SymbolTable<'src> {
         }
     }
 
-    fn declare(&mut self, token: Token) -> Result<u32> {
+    fn declare(&mut self, name_token: &Token, ty_token: &Token) -> Result<u32> {
         let index: u32 = self.locals.len().try_into()?;
-        let name = token.span.as_str(self.source);
+        let name = name_token.span.as_str(self.source);
         let Some(env) = self.environments.front_mut() else {
             return Err(CompileError {
                 message: format!("Variable '{name}' was declared outside of any scope"),
-                span: token.span,
+                span: name_token.span,
             }
             .into());
         };
@@ -58,19 +88,30 @@ impl<'src> SymbolTable<'src> {
         if env.contains_key(name) {
             return Err(CompileError {
                 message: format!("Variable '{name}' was already declared in this scope"),
-                span: token.span,
+                span: name_token.span,
             }
             .into());
         }
-        env.insert(name.into(), index);
+        let ty_name = ty_token.span.as_str(self.source);
+        let Some(ty) = Ty::from_lexeme(ty_name) else {
+            return Err(
+                CompileError {
+                    message: format!("Unknown type {ty_name}"),
+                    span: ty_token.span
+                }.into()
+            )
+        };
+        let local_var = LocalVar { index, ty};
+        env.insert(name.into(), local_var);
+        self.locals.insert(*name_token, local_var);
         Ok(index)
     }
 
-    fn resolve_var(&mut self, token: Token) -> Result<()> {
+    fn resolve_var(&mut self, token: &Token) -> Result<()> {
         let name = token.span.as_str(self.source);
         for env in &self.environments {
             if let Some(&index) = env.get(name) {
-                self.locals.insert(token, index);
+                self.locals.insert(*token, index);
                 return Ok(());
             }
         }
@@ -81,7 +122,7 @@ impl<'src> SymbolTable<'src> {
         .into())
     }
 
-    fn lookup_var(&self, token: Token) -> Result<u32> {
+    fn lookup_var(&self, token: &Token) -> Result<LocalVar> {
         let name = token.span.as_str(self.source);
         self.locals
             .get(&token)
@@ -161,16 +202,15 @@ impl<'src> Compiler<'src> {
             }
             StmtKind::Declaration {
                 name,
-                ty: _ty,
+                ty,
                 value,
             } => {
-                self.symbol_table.declare(*name)?;
-                self.symbol_table.resolve_var(*name)?;
+                self.symbol_table.declare(name, ty)?;
                 self.resolve_expression(value)?;
             }
 
             StmtKind::Assignment { name, value } => {
-                self.symbol_table.resolve_var(*name)?;
+                self.symbol_table.resolve_var(name)?;
                 self.resolve_expression(value)?;
             }
 
@@ -209,7 +249,7 @@ impl<'src> Compiler<'src> {
                 );
             }
             ExprKind::Literal(_) => {}
-            ExprKind::Variable { name } => self.symbol_table.resolve_var(*name)?,
+            ExprKind::Variable { name } => self.symbol_table.resolve_var(name)?,
             ExprKind::Binary { left, right, .. }
             | ExprKind::Or { left, right, .. }
             | ExprKind::And { left, right, .. } => {
@@ -219,6 +259,54 @@ impl<'src> Compiler<'src> {
             ExprKind::Not { right } => self.resolve_expression(right)?,
         }
         Ok(())
+    }
+
+    fn type_check(&mut self, stmt: &Stmt) -> Result<()> {
+        match &stmt.kind {
+            StmtKind::Block { statements } => {
+                for stmt in statements {
+                    self.type_check(stmt)?
+                }
+            }
+            StmtKind::Call { .. } => {
+                // TODO: We still don't have proper support for calls, so nothing to do.
+            }
+            StmtKind::Declaration { name, value , ..}
+            | StmtKind::Assignment { name, value } => {
+                let initializer_ty =  self.type_check_expr(value)?;
+                let var_ty = self.symbol_table.lookup_var(name)?.ty;
+                if initializer_ty != var_ty {
+                    return self.error(
+                        format!("Type Error: expected {var_ty:?} but found {initializer_ty:?}"),
+                        value.node.span
+                    )
+                }
+            }
+            StmtKind::If { condition, then_block, else_block } => {
+                self.type_check_expr(condition)?; // TODO: Introduce boolean types
+                self.type_check(then_block)?;
+                if let Some(e) = else_block {
+                    self.type_check(e)?;
+                }
+            }
+            StmtKind::While { condition, body } => {
+                self.type_check_expr(condition)?; // TODO: Introduce boolean types
+                self.type_check(body)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn type_check_expr(&mut self, expr: &Expr) -> Result<Ty> {
+        match &expr.kind {
+            ExprKind::Literal(_) => {}
+            ExprKind::Variable { .. } => {}
+            ExprKind::Binary { .. } => {}
+            ExprKind::Or { .. } => {}
+            ExprKind::And { .. } => {}
+            ExprKind::Not { .. } => {}
+        }
+        Ok(Ty::I32)
     }
 
     fn main(&mut self, module: &Module) -> Result<()> {
@@ -290,9 +378,9 @@ impl<'src> Compiler<'src> {
             }
 
             StmtKind::Declaration { name, value, .. } | StmtKind::Assignment { name, value } => {
-                let local_idx = self.symbol_table.lookup_var(*name)?;
+                let local_var = self.symbol_table.lookup_var(name)?;
                 self.expression(func, value)?; // TODO: Define what to do when declared var is used in initializer
-                func.instruction(&Instruction::LocalSet(local_idx));
+                func.instruction(&Instruction::LocalSet(local_var.index));
             }
 
             StmtKind::If {
@@ -364,7 +452,7 @@ impl<'src> Compiler<'src> {
             }
             ExprKind::Or { left, right } => {
                 self.expression(func, left)?;
-                func.instruction(&Instruction::If(BlockType::Result(I32)));
+                func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
                 func.instruction(&Instruction::I32Const(1));
                 func.instruction(&Instruction::Else);
                 self.expression(func, right)?;
@@ -372,7 +460,7 @@ impl<'src> Compiler<'src> {
             }
             ExprKind::And { left, right } => {
                 self.expression(func, left)?;
-                func.instruction(&Instruction::If(BlockType::Result(I32)));
+                func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
                 self.expression(func, right)?;
                 func.instruction(&Instruction::Else);
                 func.instruction(&Instruction::I32Const(0));
@@ -380,15 +468,15 @@ impl<'src> Compiler<'src> {
             }
             ExprKind::Not { right } => {
                 self.expression(func, right)?;
-                func.instruction(&Instruction::If(BlockType::Result(I32)));
+                func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
                 func.instruction(&Instruction::I32Const(0));
                 func.instruction(&Instruction::Else);
                 func.instruction(&Instruction::I32Const(1));
                 func.instruction(&Instruction::End);
             }
             ExprKind::Variable { name } => {
-                let index = self.symbol_table.lookup_var(*name)?;
-                func.instruction(&Instruction::LocalGet(index));
+                let local_var = self.symbol_table.lookup_var(name)?;
+                func.instruction(&Instruction::LocalGet(local_var.index));
             }
         }
         Ok(())
