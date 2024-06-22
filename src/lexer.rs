@@ -35,7 +35,6 @@ pub enum TokenKind {
 
     True,
     False,
-
     Int,
     Float,
     Identifier,

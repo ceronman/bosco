@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod test;
 
-use crate::ast::{Expr, ExprKind, Literal, Module, Node, NodeId, Stmt, StmtKind};
+use crate::ast::{Expr, ExprKind, LiteralKind, Module, Node, NodeId, Stmt, StmtKind};
 use crate::lexer::{Lexer, Span, Token, TokenKind};
 use anyhow::Result;
 use thiserror::Error;
@@ -142,7 +142,11 @@ impl<'src> Parser<'src> {
 
     fn expression_atom(&mut self) -> Result<Expr> {
         match self.token.kind {
-            TokenKind::Str | TokenKind::Int | TokenKind::Float => self.literal(),
+            TokenKind::Str
+            | TokenKind::Int
+            | TokenKind::Float
+            | TokenKind::False
+            | TokenKind::True => self.literal(),
             TokenKind::Identifier => self.variable(),
             other_kind => self.error(format!("Expected expression, got {other_kind:?}")),
         }
@@ -155,11 +159,12 @@ impl<'src> Parser<'src> {
     fn literal(&mut self) -> Result<Expr> {
         let token = self.token;
         let kind = match token.kind {
+            TokenKind::True => ExprKind::Literal(LiteralKind::Bool(true)),
+            TokenKind::False => ExprKind::Literal(LiteralKind::Bool(false)),
             TokenKind::Str => {
                 let lexeme = self.token.span.as_str(self.source);
                 let value = lexeme[1..(lexeme.len() - 1)].to_string(); // TODO: Improve
-                self.advance();
-                ExprKind::Literal(Literal::String { token, value })
+                ExprKind::Literal(LiteralKind::String { token, value })
             }
             TokenKind::Int => {
                 let value = token.span.as_str(self.source);
@@ -167,8 +172,7 @@ impl<'src> Parser<'src> {
                     msg: format!("Unable to parse integer {value}: {e}"),
                     span: token.span,
                 })?;
-                self.advance();
-                ExprKind::Literal(Literal::Int(value))
+                ExprKind::Literal(LiteralKind::Int(value))
             }
             TokenKind::Float => {
                 let value = token.span.as_str(self.source);
@@ -176,11 +180,11 @@ impl<'src> Parser<'src> {
                     msg: format!("Unable to parse float {value}: {e}"),
                     span: token.span,
                 })?;
-                self.advance();
-                ExprKind::Literal(Literal::Float(value))
+                ExprKind::Literal(LiteralKind::Float(value))
             }
             _ => return self.error(format!("Expected literal, got {:?}", token.kind)),
         };
+        self.advance();
         Ok(Expr {
             node: self.node(token.span, token.span),
             kind,
@@ -227,8 +231,8 @@ impl<'src> Parser<'src> {
     fn declaration(&mut self) -> Result<Stmt> {
         let let_kw = self.expect(TokenKind::Let)?;
         let name = self.expect(TokenKind::Identifier)?;
-        let ty = self.expect_msg(TokenKind::Identifier, |token| {
-            format!("Expected variable type, got {:?}", token.kind)
+        let ty = self.expect_msg(TokenKind::Identifier, |_token| {
+            "Type is required in declarations".to_string()
         })?;
         self.expect(TokenKind::Equal)?;
         let value = self.expression()?;

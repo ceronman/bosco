@@ -56,7 +56,7 @@ pub struct Expr {
 
 #[derive(Debug)]
 pub enum ExprKind {
-    Literal(Literal),
+    Literal(LiteralKind),
     Variable {
         name: Token,
     },
@@ -79,8 +79,9 @@ pub enum ExprKind {
 }
 
 #[derive(Debug)]
-pub enum Literal {
+pub enum LiteralKind {
     Int(i32),
     Float(f64),
+    Bool(bool),
     String { token: Token, value: String },
 }

@@ -7,7 +7,7 @@ use wasm_encoder::{
     Function, FunctionSection, ImportSection, Instruction, MemoryType, TypeSection, ValType,
 };
 
-use crate::ast::{Expr, ExprKind, Literal, Module, NodeId, Stmt, StmtKind};
+use crate::ast::{Expr, ExprKind, LiteralKind, Module, NodeId, Stmt, StmtKind};
 use crate::lexer::{Span, Token, TokenKind};
 use crate::parser::parse;
 
@@ -32,6 +32,7 @@ pub struct CompileError {
 pub enum Ty {
     Int,
     Float,
+    Bool,
 }
 
 impl Ty {
@@ -40,6 +41,7 @@ impl Ty {
         match lexeme {
             "int" => Some(Ty::Int),
             "float" => Some(Ty::Float),
+            "bool" => Some(Ty::Bool),
             _ => None,
         }
     }
@@ -223,7 +225,7 @@ impl<'src> Compiler<'src> {
 
     fn resolve_expression(&mut self, expr: &Expr) -> Result<()> {
         match &expr.kind {
-            ExprKind::Literal(Literal::String { token, value }) => {
+            ExprKind::Literal(LiteralKind::String { token, value }) => {
                 let wasm_str = WasmStr {
                     memory: Compiler::MEM,
                     offset: self.data_offset,
@@ -306,14 +308,26 @@ impl<'src> Compiler<'src> {
                 then_block,
                 else_block,
             } => {
-                self.type_check_expr(condition)?; // TODO: Introduce boolean types
+                let condition_ty = self.type_check_expr(condition)?;
+                if condition_ty != Ty::Bool {
+                    return self.error(
+                        format!("Type Error: condition should be 'bool', but got {condition_ty:?}"),
+                        condition.node.span,
+                    );
+                }
                 self.type_check(then_block)?;
                 if let Some(e) = else_block {
                     self.type_check(e)?;
                 }
             }
             StmtKind::While { condition, body } => {
-                self.type_check_expr(condition)?; // TODO: Introduce boolean types
+                let condition_ty = self.type_check_expr(condition)?;
+                if condition_ty != Ty::Bool {
+                    return self.error(
+                        format!("Type Error: condition should be 'bool', but got {condition_ty:?}"),
+                        condition.node.span,
+                    );
+                }
                 self.type_check(body)?;
             }
         }
@@ -322,9 +336,10 @@ impl<'src> Compiler<'src> {
 
     fn type_check_expr(&mut self, expr: &Expr) -> Result<Ty> {
         let ty = match &expr.kind {
-            ExprKind::Literal(Literal::Int(_)) => Ty::Int,
-            ExprKind::Literal(Literal::Float(_)) => Ty::Float,
-            ExprKind::Literal(Literal::String { .. }) => Ty::Int, // TODO: Fix me!
+            ExprKind::Literal(LiteralKind::Int(_)) => Ty::Int,
+            ExprKind::Literal(LiteralKind::Float(_)) => Ty::Float,
+            ExprKind::Literal(LiteralKind::String { .. }) => Ty::Int, // TODO: Fix me!
+            ExprKind::Literal(LiteralKind::Bool(_)) => Ty::Bool,      // TODO: Fix me!
             ExprKind::Variable { name } => {
                 let local_var = self.symbol_table.lookup_var(name)?;
                 local_var.ty
@@ -349,20 +364,36 @@ impl<'src> Compiler<'src> {
                         expr.node.span,
                     );
                 }
-                left_ty
+
+                match operator.kind {
+                    TokenKind::LessEqual
+                    | TokenKind::Less
+                    | TokenKind::EqualEqual
+                    | TokenKind::BangEqual
+                    | TokenKind::GreaterEqual
+                    | TokenKind::Greater => Ty::Bool,
+                    _ => left_ty,
+                }
             }
             ExprKind::Or { left, right } | ExprKind::And { left, right } => {
                 let left_ty = self.type_check_expr(left)?;
-                let right_ty = self.type_check_expr(right)?;
-                if left_ty != right_ty {
-                    return self.error(
-                        format!("Type Error: incompatible types {left_ty:?} and {right_ty:?}"),
-                        expr.node.span,
-                    );
+
+                if left_ty != Ty::Bool {
+                    return self.error("Type Error: operand should be 'bool'", left.node.span);
                 }
-                Ty::Int
+                let right_ty = self.type_check_expr(right)?;
+                if right_ty != Ty::Bool {
+                    return self.error("Type Error: operand should be 'bool'", right.node.span);
+                }
+                Ty::Bool
             }
-            ExprKind::Not { right } => self.type_check_expr(right)?,
+            ExprKind::Not { right } => {
+                let right_ty = self.type_check_expr(right)?;
+                if right_ty != Ty::Bool {
+                    return self.error("Type Error: operand should be 'bool'", right.node.span);
+                }
+                Ty::Bool
+            }
         };
         self.expression_types.insert(expr.node.id, ty);
         Ok(ty)
@@ -381,7 +412,7 @@ impl<'src> Compiler<'src> {
             .collect::<Vec<_>>();
         local_indices.sort_by_key(|l| l.index);
         let locals = local_indices.iter().map(|l| match l.ty {
-            Ty::Int => (1, ValType::I32),
+            Ty::Int | Ty::Bool => (1, ValType::I32),
             Ty::Float => (1, ValType::F64),
         });
         let mut main_function = Function::new(locals);
@@ -412,7 +443,7 @@ impl<'src> Compiler<'src> {
                 match callee_name {
                     "print" => {
                         // NOTE Args are already checked in type check
-                        if let ExprKind::Literal(Literal::String { token, .. }) = args[0].kind {
+                        if let ExprKind::Literal(LiteralKind::String { token, .. }) = args[0].kind {
                             let Some(was_str) = self.strings.get(&token) else {
                                 return self.error("String constant not found", token.span);
                             };
@@ -471,13 +502,20 @@ impl<'src> Compiler<'src> {
 
     fn expression(&mut self, func: &mut Function, expr: &Expr) -> Result<()> {
         match &expr.kind {
-            ExprKind::Literal(Literal::Int(value)) => {
+            ExprKind::Literal(LiteralKind::Int(value)) => {
                 func.instruction(&Instruction::I32Const(*value));
             }
-            ExprKind::Literal(Literal::Float(value)) => {
+            ExprKind::Literal(LiteralKind::Bool(value)) => {
+                if *value {
+                    func.instruction(&Instruction::I32Const(1));
+                } else {
+                    func.instruction(&Instruction::I32Const(0));
+                }
+            }
+            ExprKind::Literal(LiteralKind::Float(value)) => {
                 func.instruction(&Instruction::F64Const(*value));
             }
-            ExprKind::Literal(Literal::String { .. }) => {
+            ExprKind::Literal(LiteralKind::String { .. }) => {
                 todo!("Literal strings are not implemented")
             }
             ExprKind::Binary {

@@ -1,4 +1,4 @@
-use crate::ast::{Expr, ExprKind, Literal, Module, Stmt, StmtKind};
+use crate::ast::{Expr, ExprKind, LiteralKind, Module, Stmt, StmtKind};
 use crate::lexer::Token;
 use crate::parser::parse;
 use std::fmt::{Debug, Formatter};
@@ -85,12 +85,19 @@ impl SExpr for Expr {
     }
 }
 
-impl SExpr for Literal {
+impl SExpr for LiteralKind {
     fn s_expr(&self, _src: &str) -> String {
         match self {
-            Literal::Int(value) => format!("{value}"),
-            Literal::Float(value) => format!("{value}"),
-            Literal::String { value, .. } => format!("\"{value}\""),
+            LiteralKind::Int(value) => format!("{value}"),
+            LiteralKind::Float(value) => format!("{value}"),
+            LiteralKind::String { value, .. } => format!("\"{value}\""),
+            LiteralKind::Bool(value) => {
+                if *value {
+                    format!("true")
+                } else {
+                    format!("false")
+                }
+            }
         }
     }
 }
@@ -208,6 +215,23 @@ fn test_simple_call() {
     test_parser! {
         "print(\"hello\")",
         (module ((call print "hello")))
+    }
+}
+
+#[test]
+fn test_literals() {
+    test_parser! {
+        r#"
+            a = 1
+            b = 2.5
+            c = true
+            d = false
+        "#,
+        (module (
+            (= a 1)
+            (= b 2.5)
+            (= c true)
+            (= d false)))
     }
 }
 

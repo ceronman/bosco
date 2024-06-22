@@ -212,6 +212,22 @@ fn test_float() {
     )
 }
 
+#[test]
+fn test_bool() {
+    program_test(
+        r#"
+            let x bool = true
+            let y bool = false
+            if x or y {
+                print("worked")
+            }
+        "#,
+        r#"
+            worked
+        "#,
+    )
+}
+
 fn assert_error(source: &str, expected: &str) {
     match compile(source) {
         Ok(_) => panic!("No error returned"),
@@ -244,7 +260,7 @@ fn test_errors() {
     );
     assert_error(
         "let x = 1",
-        "Parse Error: Expected variable type, got Equal at Span(6, 7)",
+        "Parse Error: Type is required in declarations at Span(6, 7)",
     );
 }
 
@@ -306,5 +322,34 @@ fn test_type_errors() {
     assert_error(
         "print_float(1)",
         "Compilation Error: Function 'print_float' requires an float as argument at Span(0, 14)",
+    );
+
+    assert_error(
+        r#"
+            if 1 {
+                print("hello")
+            }
+        "#,
+        "Compilation Error: Type Error: condition should be 'bool', but got Int at Span(16, 17)",
+    );
+
+    assert_error(
+        r#"
+            while 0.0 {
+                print("hello")
+            }
+        "#,
+        "Compilation Error: Type Error: condition should be 'bool', but got Float at Span(19, 22)",
+    );
+
+    assert_error(
+        r#"
+            let x int = 1
+            let y int = 1
+            if x or y {
+                print("foo!")
+            }
+        "#,
+        "Compilation Error: Type Error: operand should be 'bool' at Span(68, 69)",
     );
 }
