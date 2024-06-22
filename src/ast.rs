@@ -4,7 +4,7 @@ pub type NodeId = u32;
 
 #[derive(Copy, Clone, Debug)]
 pub struct Node {
-    pub _id: NodeId,
+    pub id: NodeId,
     pub span: Span,
 }
 

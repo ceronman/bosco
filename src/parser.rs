@@ -341,7 +341,7 @@ impl<'src> Parser<'src> {
 
     fn node(&mut self, start: Span, end: Span) -> Node {
         let result = Node {
-            _id: self.id_counter,
+            id: self.id_counter,
             span: Span(start.0, end.1),
         };
         self.id_counter += 1;

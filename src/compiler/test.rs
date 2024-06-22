@@ -28,9 +28,18 @@ fn run_in_wasmi(source: &str) -> anyhow::Result<String> {
         },
     );
 
-    let output_print_num = output.clone();
-    let print_num = Func::wrap(&mut store, move |_caller: Caller<'_, ()>, num: i32| {
-        output_print_num
+    let output_print_int = output.clone();
+    let print_int = Func::wrap(&mut store, move |_caller: Caller<'_, ()>, num: i32| {
+        output_print_int
+            .lock()
+            .unwrap()
+            .push_str(&format!("{num}\n"));
+        Ok(())
+    });
+
+    let output_print_float = output.clone();
+    let print_float = Func::wrap(&mut store, move |_caller: Caller<'_, ()>, num: f64| {
+        output_print_float
             .lock()
             .unwrap()
             .push_str(&format!("{num}\n"));
@@ -39,7 +48,8 @@ fn run_in_wasmi(source: &str) -> anyhow::Result<String> {
 
     let mut linker = <Linker<HostState>>::new(&engine);
     linker.define("js", "print", print)?;
-    linker.define("js", "print_num", print_num)?;
+    linker.define("js", "print_int", print_int)?;
+    linker.define("js", "print_float", print_float)?;
     linker.define("js", "mem", memory)?;
 
     let instance = linker.instantiate(&mut store, &module)?.start(&mut store)?;
@@ -84,9 +94,9 @@ fn test_declaration_assignment() {
     program_test(
         r#"
             let a int = 1
-            print_num(a)
+            print_int(a)
             a = 64
-            print_num(a)
+            print_int(a)
         "#,
         r#"
             1
@@ -102,11 +112,11 @@ fn test_expressions() {
             let a int = 1
             let b int = 2
             let c int = a + b * 2 + 4
-            print_num(c)
+            print_int(c)
             let d int = a + b * c / 5 % 2
-            print_num(d)
+            print_int(d)
             let e int = (a + b) * (c - d)
-            print_num(e)
+            print_int(e)
         "#,
         r#"
             9
@@ -152,7 +162,7 @@ fn test_while_loop() {
         r#"
             let x int = 5
             while x > 0 {
-                print_num(x)
+                print_int(x)
                 x = x - 1
             }
             print("end")
@@ -174,16 +184,30 @@ fn test_scopes() {
         r#"
             let x int = 1
             {
-                print_num(x)
+                print_int(x)
                 let x int = 2
-                print_num(x)
+                print_int(x)
             }
-            print_num(x)
+            print_int(x)
         "#,
         r#"
             1
             2
             1
+        "#,
+    )
+}
+
+#[test]
+fn test_float() {
+    program_test(
+        r#"
+            let x float = 1.0
+            let y float = 2.0
+            print_float(x / y)
+        "#,
+        r#"
+            0.5
         "#,
     )
 }
@@ -201,7 +225,7 @@ fn assert_error(source: &str, expected: &str) {
 fn test_errors() {
     assert_error(
         "print()",
-        "Compilation Error: The 'print' function requires one argument at Span(0, 7)",
+        "Compilation Error: The 'print' function requires a single argument at Span(0, 7)",
     );
     assert_error(
         "print(",
@@ -243,7 +267,7 @@ fn test_type_errors() {
             let y float = 1.5
             let z int = x + y
         "#,
-        "Compilation Error: Type Error: incompatible types Int and Float at Span(81, 86)",
+        "Compilation Error: Type Error: operator Plus has incompatible types Int and Float at Span(81, 86)",
     );
 
     assert_error(
@@ -254,5 +278,33 @@ fn test_type_errors() {
             }
         "#,
         "Compilation Error: Type Error: expected Int but found Float at Span(70, 73)",
+    );
+
+    assert_error(
+        r#"
+            let x int = 1
+            let y float = 1.5
+            let z int = x % y
+        "#,
+        "Compilation Error: Type Error: operator Percent has incompatible types Int and Float at Span(81, 86)",
+    );
+
+    assert_error(
+        r#"
+            let x float = 1.0
+            let y float = 1.5
+            let z int = x % y
+        "#,
+        "Compilation Error: Type Error: '%' operator doesn't work on floats at Span(85, 90)",
+    );
+
+    assert_error(
+        "print_int(1.5)",
+        "Compilation Error: Function 'print_int' requires an int as argument at Span(0, 14)",
+    );
+
+    assert_error(
+        "print_float(1)",
+        "Compilation Error: Function 'print_float' requires an float as argument at Span(0, 14)",
     );
 }

@@ -7,7 +7,7 @@ use wasm_encoder::{
     Function, FunctionSection, ImportSection, Instruction, MemoryType, TypeSection, ValType,
 };
 
-use crate::ast::{Expr, ExprKind, Literal, Module, Stmt, StmtKind};
+use crate::ast::{Expr, ExprKind, Literal, Module, NodeId, Stmt, StmtKind};
 use crate::lexer::{Span, Token, TokenKind};
 use crate::parser::parse;
 
@@ -141,6 +141,7 @@ struct Compiler<'src> {
     strings: HashMap<Token, WasmStr>,
     symbol_table: SymbolTable<'src>,
     fn_indices: HashMap<&'static str, u32>,
+    expression_types: HashMap<NodeId, Ty>,
     types: TypeSection,
     functions: FunctionSection,
     codes: CodeSection,
@@ -159,6 +160,7 @@ impl<'src> Compiler<'src> {
             strings: Default::default(),
             symbol_table: SymbolTable::new(source),
             fn_indices: Default::default(),
+            expression_types: Default::default(),
             types: Default::default(),
             functions: Default::default(),
             codes: Default::default(),
@@ -255,8 +257,39 @@ impl<'src> Compiler<'src> {
                     self.type_check(stmt)?
                 }
             }
-            StmtKind::Call { .. } => {
-                // TODO: We still don't have proper support for calls, so nothing to do.
+            StmtKind::Call { callee, args } => {
+                let callee_name = callee.span.as_str(self.source);
+                if args.len() != 1 {
+                    return self.error(
+                        format!("The '{callee_name}' function requires a single argument"),
+                        stmt.node.span,
+                    );
+                }
+                let arg_ty = self.type_check_expr(&args[0])?;
+                match callee_name {
+                    "print" => {} // TODO: Strings
+                    "print_int" => {
+                        if arg_ty != Ty::Int {
+                            return self.error(
+                                "Function 'print_int' requires an int as argument",
+                                stmt.node.span,
+                            );
+                        }
+                    }
+                    "print_float" => {
+                        if arg_ty != Ty::Float {
+                            return self.error(
+                                "Function 'print_float' requires an float as argument",
+                                stmt.node.span,
+                            );
+                        }
+                    }
+
+                    _ => {
+                        return self
+                            .error(format!("Unknown function '{callee_name}'"), stmt.node.span)
+                    } // TODO: duplicated error in compilation
+                }
             }
             StmtKind::Declaration { name, value, .. } | StmtKind::Assignment { name, value } => {
                 let initializer_ty = self.type_check_expr(value)?;
@@ -288,30 +321,51 @@ impl<'src> Compiler<'src> {
     }
 
     fn type_check_expr(&mut self, expr: &Expr) -> Result<Ty> {
-        match &expr.kind {
-            ExprKind::Literal(Literal::Int(_)) => Ok(Ty::Int),
-            ExprKind::Literal(Literal::Float(_)) => Ok(Ty::Float),
-            ExprKind::Literal(Literal::String { .. }) => todo!(),
+        let ty = match &expr.kind {
+            ExprKind::Literal(Literal::Int(_)) => Ty::Int,
+            ExprKind::Literal(Literal::Float(_)) => Ty::Float,
+            ExprKind::Literal(Literal::String { .. }) => Ty::Int, // TODO: Fix me!
             ExprKind::Variable { name } => {
                 let local_var = self.symbol_table.lookup_var(name)?;
-                Ok(local_var.ty)
+                local_var.ty
             }
-            ExprKind::Binary { left, right, .. }
-            | ExprKind::Or { left, right }
-            | ExprKind::And { left, right } => {
+            ExprKind::Binary {
+                left,
+                right,
+                operator,
+            } => {
                 let left_ty = self.type_check_expr(left)?;
                 let right_ty = self.type_check_expr(right)?;
                 if left_ty != right_ty {
-                    self.error(
+                    return self.error(
+                        format!("Type Error: operator {:?} has incompatible types {left_ty:?} and {right_ty:?}", operator.kind),
+                        expr.node.span,
+                    );
+                }
+
+                if operator.kind == TokenKind::Percent && left_ty == Ty::Float {
+                    return self.error(
+                        "Type Error: '%' operator doesn't work on floats",
+                        expr.node.span,
+                    );
+                }
+                left_ty
+            }
+            ExprKind::Or { left, right } | ExprKind::And { left, right } => {
+                let left_ty = self.type_check_expr(left)?;
+                let right_ty = self.type_check_expr(right)?;
+                if left_ty != right_ty {
+                    return self.error(
                         format!("Type Error: incompatible types {left_ty:?} and {right_ty:?}"),
                         expr.node.span,
-                    )
-                } else {
-                    Ok(left_ty)
+                    );
                 }
+                Ty::Int
             }
-            ExprKind::Not { right } => self.type_check_expr(right),
-        }
+            ExprKind::Not { right } => self.type_check_expr(right)?,
+        };
+        self.expression_types.insert(expr.node.id, ty);
+        Ok(ty)
     }
 
     fn main(&mut self, module: &Module) -> Result<()> {
@@ -319,8 +373,18 @@ impl<'src> Compiler<'src> {
         self.types.function(vec![], vec![]);
         let main_fn_index = self.imports.len() - 1;
         self.functions.function(type_index);
-        let num_locals: u32 = self.symbol_table.locals.len().try_into()?;
-        let mut main_function = Function::new([(num_locals, ValType::I32)]);
+        let mut local_indices = self
+            .symbol_table
+            .locals
+            .values()
+            .copied()
+            .collect::<Vec<_>>();
+        local_indices.sort_by_key(|l| l.index);
+        let locals = local_indices.iter().map(|l| match l.ty {
+            Ty::Int => (1, ValType::I32),
+            Ty::Float => (1, ValType::F64),
+        });
+        let mut main_function = Function::new(locals);
         self.statement(&mut main_function, &module.statement)?;
         main_function.instruction(&Instruction::End);
         self.codes.function(&main_function);
@@ -347,14 +411,8 @@ impl<'src> Compiler<'src> {
 
                 match callee_name {
                     "print" => {
-                        if args.len() != 1 {
-                            return self.error(
-                                "The 'print' function requires one argument",
-                                stmt.node.span,
-                            );
-                        }
-                        let arg = &args[0];
-                        if let ExprKind::Literal(Literal::String { token, .. }) = arg.kind {
+                        // NOTE Args are already checked in type check
+                        if let ExprKind::Literal(Literal::String { token, .. }) = args[0].kind {
                             let Some(was_str) = self.strings.get(&token) else {
                                 return self.error("String constant not found", token.span);
                             };
@@ -365,13 +423,8 @@ impl<'src> Compiler<'src> {
                             return self.error("Incorrect arguments for 'print'!", stmt.node.span);
                         }
                     }
-                    "print_num" => {
-                        if args.len() != 1 {
-                            return self.error(
-                                "The 'print_num' function requires one argument",
-                                stmt.node.span,
-                            );
-                        }
+                    "print_int" | "print_float" => {
+                        // NOTE Args are already checked in type check
                         self.expression(func, &args[0])?;
                         func.instruction(&Instruction::Call(callee));
                     }
@@ -435,23 +488,49 @@ impl<'src> Compiler<'src> {
                 self.expression(func, left)?;
                 self.expression(func, right)?;
 
+                let Some(&ty) = self.expression_types.get(&left.node.id) else {
+                    return self.error("Fatal: Not type found for expression", left.node.span);
+                };
+
                 // TODO: Not deal with tokens here?
-                // TODO: Types!
-                let ins = match operator.kind {
-                    TokenKind::EqualEqual => Instruction::I32Eq,
-                    TokenKind::BangEqual => Instruction::I32Ne,
-                    TokenKind::Greater => Instruction::I32GtS,
-                    TokenKind::GreaterEqual => Instruction::I32GeS,
-                    TokenKind::Less => Instruction::I32LtS,
-                    TokenKind::LessEqual => Instruction::I32LeS,
-                    TokenKind::Plus => Instruction::I32Add,
-                    TokenKind::Minus => Instruction::I32Sub,
-                    TokenKind::Star => Instruction::I32Mul,
-                    TokenKind::Slash => Instruction::I32DivS,
-                    TokenKind::Percent => Instruction::I32RemS,
+                let ins = match (operator.kind, ty) {
+                    (TokenKind::EqualEqual, Ty::Int) => Instruction::I32Eq,
+                    (TokenKind::EqualEqual, Ty::Float) => Instruction::F64Eq,
+
+                    (TokenKind::BangEqual, Ty::Int) => Instruction::I32Ne,
+                    (TokenKind::BangEqual, Ty::Float) => Instruction::F64Ne,
+
+                    (TokenKind::Greater, Ty::Int) => Instruction::I32GtS,
+                    (TokenKind::Greater, Ty::Float) => Instruction::F64Gt,
+
+                    (TokenKind::GreaterEqual, Ty::Int) => Instruction::I32GeS,
+                    (TokenKind::GreaterEqual, Ty::Float) => Instruction::F64Ge,
+
+                    (TokenKind::Less, Ty::Int) => Instruction::I32LtS,
+                    (TokenKind::Less, Ty::Float) => Instruction::F64Lt,
+
+                    (TokenKind::LessEqual, Ty::Int) => Instruction::I32LeS,
+                    (TokenKind::LessEqual, Ty::Float) => Instruction::F64Le,
+
+                    (TokenKind::Plus, Ty::Int) => Instruction::I32Add,
+                    (TokenKind::Plus, Ty::Float) => Instruction::I32Add,
+
+                    (TokenKind::Minus, Ty::Int) => Instruction::I32Sub,
+                    (TokenKind::Minus, Ty::Float) => Instruction::F64Sub,
+
+                    (TokenKind::Star, Ty::Int) => Instruction::I32Mul,
+                    (TokenKind::Star, Ty::Float) => Instruction::F64Mul,
+
+                    (TokenKind::Slash, Ty::Int) => Instruction::I32DivS,
+                    (TokenKind::Slash, Ty::Float) => Instruction::F64Div,
+
+                    (TokenKind::Percent, Ty::Int) => Instruction::I32RemS,
                     _ => {
                         return self.error(
-                            format!("Unsupported operant '{:?}'", operator.kind),
+                            format!(
+                                "Operator '{:?}' is not supported for type {ty:?}",
+                                operator.kind
+                            ),
                             operator.span,
                         )
                     }
@@ -493,8 +572,10 @@ impl<'src> Compiler<'src> {
     fn compile(&mut self, module: &Module) -> Result<Vec<u8>> {
         let print_idx = self.import_function("js", "print", &[ValType::I32, ValType::I32], &[]);
         self.fn_indices.insert("print", print_idx);
-        let print_idx = self.import_function("js", "print_num", &[ValType::I32], &[]);
-        self.fn_indices.insert("print_num", print_idx);
+        let print_idx = self.import_function("js", "print_int", &[ValType::I32], &[]);
+        self.fn_indices.insert("print_int", print_idx);
+        let print_idx = self.import_function("js", "print_float", &[ValType::F64], &[]);
+        self.fn_indices.insert("print_float", print_idx);
         self.import_memory();
         self.symbol_table.begin_scope();
         self.resolve(&module.statement)?;
