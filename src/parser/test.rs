@@ -1,4 +1,4 @@
-use crate::ast::{Expr, ExprKind, LiteralKind, Module, Stmt, StmtKind};
+use crate::ast::{Expr, ExprKind, Item, ItemKind, LiteralKind, Module, Param, Stmt, StmtKind};
 use crate::lexer::Token;
 use crate::parser::parse;
 use std::fmt::{Debug, Formatter};
@@ -10,13 +10,40 @@ trait SExpr {
 
 impl SExpr for Module {
     fn s_expr(&self, src: &str) -> String {
-        format!("(module {})", self.statement.s_expr(src))
+        format!("(module {})", self.items.s_expr(src))
     }
 }
 
 impl SExpr for Token {
     fn s_expr(&self, src: &str) -> String {
         self.span.as_str(src).into()
+    }
+}
+
+impl SExpr for Item {
+    fn s_expr(&self, src: &str) -> String {
+        match &self.kind {
+            ItemKind::Function {
+                name,
+                return_ty,
+                params,
+                body,
+            } => {
+                format!(
+                    "(fn {} {} (ret {}) {})",
+                    name.s_expr(src),
+                    params.s_expr(src),
+                    return_ty.s_expr(src),
+                    body.s_expr(src)
+                )
+            }
+        }
+    }
+}
+
+impl SExpr for Param {
+    fn s_expr(&self, src: &str) -> String {
+        format!("(param {} {})", self.name.s_expr(src), self.ty.s_expr(src))
     }
 }
 
@@ -210,117 +237,145 @@ macro_rules! test_parser {
     }
 }
 
+macro_rules! test_main {
+    ($code:expr , $($t:tt)*) => {
+        let code = &format!("fn main() int {{ {} }}", $code);
+        test_parser!(
+            code,
+            (module
+                (fn main (ret int)
+                    (
+                        $($t)*
+                    )
+                )
+            )
+        )
+    }
+}
+
+#[test]
+fn test_hello_world() {
+    test_parser! {
+        r#"
+            fn main() int {
+                print("Hello world!")
+            }
+        "#,
+        (module
+            (fn main (ret int)
+                (
+                    (call print "Hello world!")
+                )
+            )
+        )
+    }
+}
+
 #[test]
 fn test_simple_call() {
-    test_parser! {
+    test_main! {
         "print(\"hello\")",
-        (module ((call print "hello")))
+        (call print "hello")
     }
 }
 
 #[test]
 fn test_literals() {
-    test_parser! {
+    test_main! {
         r#"
             a = 1
             b = 2.5
             c = true
             d = false
         "#,
-        (module (
-            (= a 1)
-            (= b 2.5)
-            (= c true)
-            (= d false)))
+        (= a 1)
+        (= b 2.5)
+        (= c true)
+        (= d false)
     }
 }
 
 #[test]
 fn test_simple_call_with_ws() {
-    test_parser! {
+    test_main! {
         r#"
             print("Hello world")
         "#,
-        (module ((call print "Hello world")))
+        (call print "Hello world")
     }
 }
 
 #[test]
 fn test_let_declaration() {
-    test_parser! {
+    test_main! {
         "let a int = 1",
-        (module ((let a int 1)))
+        (let a int 1)
     }
 }
 
 #[test]
 fn test_call_expression() {
-    test_parser! {
+    test_main! {
         r#"
             let a int = 1
             print(a)
         "#,
-        (module ((let a int 1) (call print a)))
+        (let a int 1)
+        (call print a)
     }
 }
 
 #[test]
 fn test_assignment() {
-    test_parser! {
+    test_main! {
         r#"
             let a int = 1
             a = 256
         "#,
-        (module ((let a int 1) (= a 256)))
+        (let a int 1)
+        (= a 256)
     }
 }
 
 #[test]
 fn test_assignment_binary_expression() {
-    test_parser! {
+    test_main! {
         r#"
             let a int = 4
             let b int = a + 10
         "#,
-        (module
-            ((let a int 4)
-             (let b int (+ a 10))))
+        (let a int 4)
+        (let b int (+ a 10))
     }
 }
 
 #[test]
 fn test_associativity() {
-    test_parser! {
+    test_main! {
         "x = a + b + c",
-        (module
-            ((= x (+ (+ a b) c)))
-        )
+        (= x (+ (+ a b) c))
     }
 }
 
 #[test]
 fn test_precedence() {
-    test_parser! {
+    test_main! {
         "x = a + b * c + d",
-        (module
-            ((= x (+ (+ a (* b c)) d)))
-        )
+        (= x (+ (+ a (* b c)) d))
     }
 }
 
 #[test]
 fn test_grouping() {
-    test_parser! {
+    test_main! {
         "x = (a + b) * (c + d)",
-        (module
-            ((= x (* (+ a b) (+ c d))))
-        )
+        (= x (* (+ a b) (+ c d)))
     }
 }
 
 #[test]
 fn test_if_statement() {
-    test_parser! {
+    test_main! {
         r#"
             if 1 + 1 {
                 let a int = 1
@@ -329,43 +384,37 @@ fn test_if_statement() {
                 print("false")
             }
         "#,
-        (module
-            ((if (+ 1 1)
-                ((let a int 1) (call print "true"))
-                ((call print "false"))
-            ))
+        (if (+ 1 1)
+            ((let a int 1) (call print "true"))
+            ((call print "false"))
         )
     }
 }
 
 #[test]
 fn test_conditionals() {
-    test_parser! {
+    test_main! {
         r#"
             if a > 2 and b < c or 1 >= x and z == 1 {
                 print("true")
             }
         "#,
-        (module
-            ((if (or (and (> a 2) (< b c)) (and (>= 1 x) (== z 1)))
-                ((call print "true"))
-            ))
+        (if (or (and (> a 2) (< b c)) (and (>= 1 x) (== z 1)))
+            ((call print "true"))
         )
     }
 }
 
 #[test]
 fn test_block() {
-    test_parser! {
+    test_main! {
         r#"
             {
                 print("hello")
             }
         "#,
-        (module (
-            (
-                (call print "hello")
-            )
-        ))
+        (
+            (call print "hello")
+        )
     }
 }

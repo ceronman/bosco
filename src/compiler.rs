@@ -7,7 +7,7 @@ use wasm_encoder::{
     Function, FunctionSection, ImportSection, Instruction, MemoryType, TypeSection, ValType,
 };
 
-use crate::ast::{Expr, ExprKind, LiteralKind, Module, NodeId, Stmt, StmtKind};
+use crate::ast::{Expr, ExprKind, Item, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind};
 use crate::lexer::{Span, Token, TokenKind};
 use crate::parser::parse;
 
@@ -181,12 +181,29 @@ impl<'src> Compiler<'src> {
         .into())
     }
 
-    fn resolve(&mut self, statement: &Stmt) -> Result<()> {
+    fn resolve(&mut self, module: &Module) -> Result<()> {
+        for item in &module.items {
+            self.resolve_item(item)?;
+        }
+        Ok(())
+    }
+
+    fn resolve_item(&mut self, item: &Item) -> Result<()> {
+        match &item.kind {
+            // TODO: Resolve parameters
+            ItemKind::Function { body, .. } => {
+                self.resolve_stmt(body)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn resolve_stmt(&mut self, statement: &Stmt) -> Result<()> {
         match &statement.kind {
             StmtKind::Block { statements } => {
                 self.symbol_table.begin_scope();
                 for statement in statements {
-                    self.resolve(statement)?
+                    self.resolve_stmt(statement)?
                 }
                 self.symbol_table.end_scope();
             }
@@ -211,13 +228,13 @@ impl<'src> Compiler<'src> {
                 else_block,
             } => {
                 self.resolve_expression(condition)?;
-                self.resolve(then_block)?;
-                else_block.as_ref().map(|b| self.resolve(b));
+                self.resolve_stmt(then_block)?;
+                else_block.as_ref().map(|b| self.resolve_stmt(b));
             }
 
             StmtKind::While { condition, body } => {
                 self.resolve_expression(condition)?;
-                self.resolve(body)?
+                self.resolve_stmt(body)?
             }
         }
         Ok(())
@@ -252,11 +269,28 @@ impl<'src> Compiler<'src> {
         Ok(())
     }
 
-    fn type_check(&mut self, stmt: &Stmt) -> Result<()> {
+    fn type_check(&mut self, module: &Module) -> Result<()> {
+        for item in &module.items {
+            self.type_check_item(item)?;
+        }
+        Ok(())
+    }
+
+    fn type_check_item(&mut self, item: &Item) -> Result<()> {
+        //TODO: Register params & returns
+        match &item.kind {
+            ItemKind::Function { body, .. } => {
+                self.type_check_stmt(body)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn type_check_stmt(&mut self, stmt: &Stmt) -> Result<()> {
         match &stmt.kind {
             StmtKind::Block { statements } => {
                 for stmt in statements {
-                    self.type_check(stmt)?
+                    self.type_check_stmt(stmt)?
                 }
             }
             StmtKind::Call { callee, args } => {
@@ -315,9 +349,9 @@ impl<'src> Compiler<'src> {
                         condition.node.span,
                     );
                 }
-                self.type_check(then_block)?;
+                self.type_check_stmt(then_block)?;
                 if let Some(e) = else_block {
-                    self.type_check(e)?;
+                    self.type_check_stmt(e)?;
                 }
             }
             StmtKind::While { condition, body } => {
@@ -328,7 +362,7 @@ impl<'src> Compiler<'src> {
                         condition.node.span,
                     );
                 }
-                self.type_check(body)?;
+                self.type_check_stmt(body)?;
             }
         }
         Ok(())
@@ -416,7 +450,21 @@ impl<'src> Compiler<'src> {
             Ty::Float => (1, ValType::F64),
         });
         let mut main_function = Function::new(locals);
-        self.statement(&mut main_function, &module.statement)?;
+
+        if module.items.len() != 1 {
+            return self.error("Only one function allowed at the moment!", module.node.span);
+        }
+        let item = &module.items[0];
+
+        let ItemKind::Function { name, body, .. } = &item.kind else {
+            return self.error("No other items allowed", module.node.span);
+        };
+
+        if name.span.as_str(self.source) != "main" {
+            return self.error("No main function found", module.node.span);
+        }
+
+        self.statement(&mut main_function, body)?;
         main_function.instruction(&Instruction::End);
         self.codes.function(&main_function);
         self.exports
@@ -616,9 +664,9 @@ impl<'src> Compiler<'src> {
         self.fn_indices.insert("print_float", print_idx);
         self.import_memory();
         self.symbol_table.begin_scope();
-        self.resolve(&module.statement)?;
+        self.resolve(&module)?;
         self.symbol_table.end_scope();
-        self.type_check(&module.statement)?;
+        self.type_check(&module)?;
         self.main(module)?;
 
         let mut wasm_module = wasm_encoder::Module::new();

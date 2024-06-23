@@ -52,10 +52,19 @@ fn identifiers() {
 }
 
 #[test]
-fn keywords() {
+fn book_keywords() {
     test_lexer(
         "true false _true False",
         vec![True, False, Identifier, Identifier],
+        true,
+    );
+}
+
+#[test]
+fn fn_keyword() {
+    test_lexer(
+        "fn foo() {}",
+        vec![Fn, Identifier, LParen, RParen, LBrace, RBrace],
         true,
     );
 }
@@ -237,6 +246,17 @@ fn strings_together() {
         r#" "foo""bar"  "#,
         vec![Whitespace, Str, Str, Whitespace],
         false,
+    );
+}
+
+#[test]
+fn args() {
+    test_lexer(
+        "foo(1, two, 3.0)",
+        vec![
+            Identifier, LParen, Int, Comma, Identifier, Comma, Float, RParen,
+        ],
+        true,
     );
 }
 

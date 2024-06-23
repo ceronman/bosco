@@ -44,12 +44,14 @@ pub enum TokenKind {
     If,
     Else,
     While,
+    Fn,
 
     LineComment,
     BlockComment,
 
     Whitespace,
     Eol,
+    Comma,
 
     UnterminatedCommentError,
     Error,
@@ -138,6 +140,7 @@ impl<'src> Lexer<'src> {
             ('}', _) => TokenKind::RBrace,
             ('[', _) => TokenKind::LBracket,
             (']', _) => TokenKind::RBracket,
+            (',', _) => TokenKind::Comma,
             ('0'..='9', _) => self.number(),
             ('"', _) => self.string(),
             (c, _) if c == '_' || c.is_alphabetic() => self.identifier(),
@@ -209,6 +212,7 @@ impl<'src> Lexer<'src> {
     }
 
     fn string(&mut self) -> TokenKind {
+        //TODO: Handle unterminated string!
         while let Some(c) = self.eat() {
             if c == '"' {
                 break;
@@ -232,6 +236,7 @@ impl<'src> Lexer<'src> {
             "if" => TokenKind::If,
             "else" => TokenKind::Else,
             "while" => TokenKind::While,
+            "fn" => TokenKind::Fn,
             "or" => TokenKind::Or,
             "and" => TokenKind::And,
             "not" => TokenKind::Not,

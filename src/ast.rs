@@ -10,7 +10,31 @@ pub struct Node {
 
 #[derive(Debug)]
 pub struct Module {
-    pub statement: Stmt,
+    pub node: Node,
+    pub items: Vec<Item>,
+}
+
+#[derive(Debug)]
+pub struct Item {
+    pub node: Node,
+    pub kind: ItemKind,
+}
+
+#[derive(Debug)]
+pub enum ItemKind {
+    Function {
+        name: Token,
+        return_ty: Token,
+        params: Vec<Param>,
+        body: Stmt,
+    },
+}
+
+#[derive(Debug)]
+pub struct Param {
+    pub node: Node,
+    pub name: Token,
+    pub ty: Token,
 }
 
 #[derive(Debug)]

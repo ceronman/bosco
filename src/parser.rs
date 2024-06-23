@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod test;
 
-use crate::ast::{Expr, ExprKind, LiteralKind, Module, Node, NodeId, Stmt, StmtKind};
+use crate::ast::{
+    Expr, ExprKind, Item, ItemKind, LiteralKind, Module, Node, NodeId, Param, Stmt, StmtKind,
+};
 use crate::lexer::{Lexer, Span, Token, TokenKind};
 use anyhow::Result;
 use thiserror::Error;
@@ -33,19 +35,65 @@ impl<'src> Parser<'src> {
 
     fn parse(&mut self) -> Result<Module> {
         let start = self.token.span;
-        let mut statements = Vec::new();
+        let mut items = Vec::new();
         while self.token.kind != TokenKind::Eof {
             self.maybe_eol();
-            let expr = self.statement()?;
-            statements.push(expr);
+            let item = self.item()?;
+            items.push(item);
             self.maybe_eol();
         }
         let end = self.token.span;
         Ok(Module {
-            statement: Stmt {
-                node: self.node(start, end),
-                kind: StmtKind::Block { statements },
+            node: self.node(start, end),
+            items,
+        })
+    }
+
+    fn item(&mut self) -> Result<Item> {
+        match self.token.kind {
+            TokenKind::Fn => self.function(),
+            other => self.error(format!("Expected declaration, got {other:?}")),
+        }
+    }
+
+    fn function(&mut self) -> Result<Item> {
+        let fn_keyword = self.expect(TokenKind::Fn)?;
+        let name = self.expect(TokenKind::Identifier)?;
+        self.expect(TokenKind::LParen)?;
+        let mut params = Vec::new();
+        if self.token.kind != TokenKind::RParen {
+            loop {
+                self.maybe_eol();
+                params.push(self.param()?);
+
+                if !self.eat(TokenKind::Comma) {
+                    break;
+                }
+            }
+        }
+        self.expect(TokenKind::RParen)?;
+        let return_ty = self.expect_msg(TokenKind::Identifier, |_| {
+            "Function require return type".to_string()
+        })?;
+        let body = self.statement()?;
+        Ok(Item {
+            node: self.node(fn_keyword.span, body.node.span),
+            kind: ItemKind::Function {
+                name,
+                return_ty,
+                params,
+                body,
             },
+        })
+    }
+
+    fn param(&mut self) -> Result<Param> {
+        let name = self.expect(TokenKind::Identifier)?;
+        let ty = self.expect(TokenKind::Identifier)?;
+        Ok(Param {
+            node: self.node(name.span, ty.span),
+            name,
+            ty,
         })
     }
 
@@ -335,9 +383,9 @@ impl<'src> Parser<'src> {
         self.error(msg(token))
     }
 
-    fn error<T>(&self, msg: String) -> Result<T> {
+    fn error<T>(&self, msg: impl Into<String>) -> Result<T> {
         Err(ParseError {
-            msg,
+            msg: msg.into(),
             span: self.token.span,
         }
         .into())
