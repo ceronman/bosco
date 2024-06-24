@@ -34,7 +34,6 @@ impl<'src> Parser<'src> {
     }
 
     fn parse(&mut self) -> Result<Module> {
-        let start = self.token.span;
         let mut items = Vec::new();
         while self.token.kind != TokenKind::Eof {
             self.maybe_eol();
@@ -42,7 +41,8 @@ impl<'src> Parser<'src> {
             items.push(item);
             self.maybe_eol();
         }
-        let end = self.token.span;
+        let start = items.first().map(|i| i.node.span).unwrap_or(Span(0, 0));
+        let end = items.last().map(|i| i.node.span).unwrap_or(Span(0, 0));
         Ok(Module {
             node: self.node(start, end),
             items,

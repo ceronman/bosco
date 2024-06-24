@@ -22,9 +22,9 @@ struct WasmStr {
 }
 
 #[derive(Error, Debug)]
-#[error("Compilation Error: {message} at {span:?}")]
+#[error("Compilation Error: {msg} at {span:?}")]
 pub struct CompileError {
-    message: String,
+    msg: String,
     span: Span,
 }
 
@@ -73,7 +73,7 @@ impl<'src> SymbolTable<'src> {
         let name = name_token.span.as_str(self.source);
         let Some(env) = self.environments.front_mut() else {
             return Err(CompileError {
-                message: format!("Variable '{name}' was declared outside of any scope"),
+                msg: format!("Variable '{name}' was declared outside of any scope"),
                 span: name_token.span,
             }
             .into());
@@ -81,7 +81,7 @@ impl<'src> SymbolTable<'src> {
 
         if env.contains_key(name) {
             return Err(CompileError {
-                message: format!("Variable '{name}' was already declared in this scope"),
+                msg: format!("Variable '{name}' was already declared in this scope"),
                 span: name_token.span,
             }
             .into());
@@ -89,7 +89,7 @@ impl<'src> SymbolTable<'src> {
         let ty_name = ty_token.span.as_str(self.source);
         let Some(ty) = Ty::from_lexeme(ty_name) else {
             return Err(CompileError {
-                message: format!("Unknown type {ty_name}"),
+                msg: format!("Unknown type {ty_name}"),
                 span: ty_token.span,
             }
             .into());
@@ -109,7 +109,7 @@ impl<'src> SymbolTable<'src> {
             }
         }
         Err(CompileError {
-            message: format!("Undeclared variable '{name}'"),
+            msg: format!("Undeclared variable '{name}'"),
             span: token.span,
         }
         .into())
@@ -121,7 +121,7 @@ impl<'src> SymbolTable<'src> {
             .get(token)
             .ok_or(
                 CompileError {
-                    message: format!("Undeclared variable '{name}'"),
+                    msg: format!("Undeclared variable '{name}'"),
                     span: token.span,
                 }
                 .into(),
@@ -175,7 +175,7 @@ impl<'src> Compiler<'src> {
 
     fn error<T>(&self, msg: impl Into<String>, span: Span) -> Result<T> {
         Err(CompileError {
-            message: msg.into(),
+            msg: msg.into(),
             span,
         }
         .into())

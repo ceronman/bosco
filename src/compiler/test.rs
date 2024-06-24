@@ -1,8 +1,12 @@
+use ariadne::{ColorGenerator, Label, Report, ReportKind, Source};
+use std::io::Read;
 use std::sync::{Arc, Mutex};
 
 use wasmi::{Caller, Engine, Func, Linker, Memory, MemoryType, Module, Store};
 
-use crate::compiler::compile;
+use crate::compiler::{compile, CompileError};
+use crate::lexer::Span;
+use crate::parser::ParseError;
 
 fn run_in_wasmi(source: &str) -> anyhow::Result<String> {
     let wasm = compile(source)?;
@@ -73,7 +77,29 @@ fn program_test(source: &str, expected_out: &str) {
                     .join("\n")
             );
         }
-        Err(e) => panic!("{e:?}"),
+        Err(dynamic_error) => {
+            let mut title = "Unknown error";
+            let mut message = format!("{dynamic_error:?}");
+            let mut span = Span(0, 0);
+            if let Some(e) = dynamic_error.downcast_ref::<CompileError>() {
+                title = "Compile Error";
+                message = e.msg.clone();
+                span = e.span;
+            }
+            if let Some(e) = dynamic_error.downcast_ref::<ParseError>() {
+                title = "Parse Error";
+                message = e.msg.clone();
+                span = e.span;
+            }
+            let mut buffer = Vec::new();
+            Report::build(ReportKind::Error, (), span.0)
+                .with_message(title)
+                .with_label(Label::new(span.0..span.1).with_message(message))
+                .finish()
+                .write(Source::from(source), &mut buffer)
+                .unwrap();
+            panic!("{}", String::from_utf8(buffer).unwrap());
+        }
     }
 }
 
@@ -240,6 +266,24 @@ fn test_bool() {
         "#,
         r#"
             worked
+        "#,
+    )
+}
+
+#[test]
+fn test_functions() {
+    program_test(
+        r#"
+            fn main() int {
+                print("hello main!")
+            }
+
+            fn other() int {
+                print("hello other!")
+            }
+        "#,
+        r#"
+            hello main!
         "#,
     )
 }
