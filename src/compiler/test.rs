@@ -1,5 +1,4 @@
-use ariadne::{ColorGenerator, Label, Report, ReportKind, Source};
-use std::io::Read;
+use ariadne::{Label, Report, ReportKind, Source};
 use std::sync::{Arc, Mutex};
 
 use wasmi::{Caller, Engine, Func, Linker, Memory, MemoryType, Module, Store};

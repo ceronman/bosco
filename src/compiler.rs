@@ -450,21 +450,32 @@ impl<'src> Compiler<'src> {
             Ty::Float => (1, ValType::F64),
         });
         let mut main_function = Function::new(locals);
-
-        if module.items.len() != 1 {
-            return self.error("Only one function allowed at the moment!", module.node.span);
+        for item in &module.items {
+            match &item.kind {
+                ItemKind::Function {
+                    name,
+                    body,
+                    params,
+                    return_ty,
+                } => {
+                    let name_str = name.span.as_str(self.source);
+                    if name_str != "main" {
+                        continue;
+                    }
+                    if params.len() > 0 {
+                        return self.error("'main' function do not take arguments", item.node.span);
+                    }
+                    if !matches!(
+                        Ty::from_lexeme(return_ty.span.as_str(self.source)),
+                        Some(Ty::Int)
+                    ) {
+                        return self.error("'main' should always return int", item.node.span);
+                    }
+                    self.statement(&mut main_function, body)?;
+                    break;
+                }
+            }
         }
-        let item = &module.items[0];
-
-        let ItemKind::Function { name, body, .. } = &item.kind else {
-            return self.error("No other items allowed", module.node.span);
-        };
-
-        if name.span.as_str(self.source) != "main" {
-            return self.error("No main function found", module.node.span);
-        }
-
-        self.statement(&mut main_function, body)?;
         main_function.instruction(&Instruction::End);
         self.codes.function(&main_function);
         self.exports
