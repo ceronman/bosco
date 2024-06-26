@@ -55,7 +55,7 @@ pub enum StmtKind {
     Declaration {
         name: Token,
         ty: Token,
-        value: Expr, // TODO: Support optional values
+        value: Option<Expr>,
     },
     Assignment {
         name: Token,

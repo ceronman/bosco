@@ -60,7 +60,7 @@ impl SExpr for Stmt {
                 "(let {} {} {})",
                 name.s_expr(src),
                 ty.s_expr(&src),
-                value.s_expr(src)
+                value.as_ref().map(|v| v.s_expr(&src)).unwrap_or("".into())
             ),
             StmtKind::Assignment { name, value } => {
                 format!("(= {} {})", name.s_expr(src), value.s_expr(src))
@@ -228,17 +228,17 @@ fn parse_chars(expr: &mut Chars<'_>) -> SExpression {
 }
 
 macro_rules! test_parser {
-    ($code:expr , $($t:tt)*) => {
+    ($code:expr , $($t:tt)*) => {{
         let actual = s_expr($code);
         let actual = parse_sexpr(&actual);
         let expected = stringify!($($t)*);
         let expected = parse_sexpr(expected);
         assert_eq!(expected, actual);
-    }
+    }}
 }
 
 macro_rules! test_main {
-    ($code:expr , $($t:tt)*) => {
+    ($code:expr , $($t:tt)*) => {{
         let code = &format!("fn main() int {{ {} }}", $code);
         test_parser!(
             code,
@@ -250,7 +250,7 @@ macro_rules! test_main {
                 )
             )
         )
-    }
+    }}
 }
 
 #[test]

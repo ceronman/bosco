@@ -282,10 +282,15 @@ impl<'src> Parser<'src> {
         let ty = self.expect_msg(TokenKind::Identifier, |_token| {
             "Type is required in declarations".to_string()
         })?;
-        self.expect(TokenKind::Equal)?;
-        let value = self.expression()?;
+        let (value, end) = if self.eat(TokenKind::Equal) {
+            let initializer = self.expression()?;
+            let span = initializer.node.span;
+            (Some(initializer), span)
+        } else {
+            (None, ty.span)
+        };
         Ok(Stmt {
-            node: self.node(let_kw.span, value.node.span),
+            node: self.node(let_kw.span, end),
             kind: StmtKind::Declaration { name, ty, value },
         })
     }

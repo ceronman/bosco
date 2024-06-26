@@ -125,11 +125,15 @@ fn test_declaration_assignment() {
                 print_int(a)
                 a = 64
                 print_int(a)
+                let b float
+                b = 1.5
+                print_float(b)
             }
         "#,
         r#"
             1
             64
+            1.5
         "#,
     )
 }

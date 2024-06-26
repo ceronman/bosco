@@ -214,7 +214,9 @@ impl<'src> Compiler<'src> {
             }
             StmtKind::Declaration { name, ty, value } => {
                 self.symbol_table.declare(name, ty)?;
-                self.resolve_expression(value)?;
+                if let Some(value) = value {
+                    self.resolve_expression(value)?;
+                }
             }
 
             StmtKind::Assignment { name, value } => {
@@ -327,9 +329,21 @@ impl<'src> Compiler<'src> {
                     } // TODO: duplicated error in compilation
                 }
             }
-            StmtKind::Declaration { name, value, .. } | StmtKind::Assignment { name, value } => {
-                let initializer_ty = self.type_check_expr(value)?;
+            StmtKind::Declaration { name, value, .. } => {
                 let var_ty = self.symbol_table.lookup_var(name)?.ty;
+                if let Some(value) = value {
+                    let initializer_ty = self.type_check_expr(value)?;
+                    if initializer_ty != var_ty {
+                        return self.error(
+                            format!("Type Error: expected {var_ty:?} but found {initializer_ty:?}"),
+                            value.node.span,
+                        );
+                    }
+                }
+            }
+            StmtKind::Assignment { name, value } => {
+                let var_ty = self.symbol_table.lookup_var(name)?.ty;
+                let initializer_ty = self.type_check_expr(value)?;
                 if initializer_ty != var_ty {
                     return self.error(
                         format!("Type Error: expected {var_ty:?} but found {initializer_ty:?}"),
@@ -525,7 +539,15 @@ impl<'src> Compiler<'src> {
                 }
             }
 
-            StmtKind::Declaration { name, value, .. } | StmtKind::Assignment { name, value } => {
+            StmtKind::Declaration { name, value, .. } => {
+                if let Some(value) = value {
+                    let local_var = self.symbol_table.lookup_var(name)?;
+                    self.expression(func, value)?; // TODO: Define what to do when declared var is used in initializer
+                    func.instruction(&Instruction::LocalSet(local_var.index));   
+                }
+            }
+
+            StmtKind::Assignment { name, value } => {
                 let local_var = self.symbol_table.lookup_var(name)?;
                 self.expression(func, value)?; // TODO: Define what to do when declared var is used in initializer
                 func.instruction(&Instruction::LocalSet(local_var.index));
