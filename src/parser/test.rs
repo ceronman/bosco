@@ -33,7 +33,11 @@ impl SExpr for Item {
                     "(fn {} {} (ret {}) {})",
                     name.s_expr(src),
                     params.s_expr(src),
-                    return_ty.s_expr(src),
+                    if let Some(ty) = return_ty {
+                        ty.s_expr(src)
+                    } else {
+                        "void".into()
+                    },
                     body.s_expr(src)
                 )
             }

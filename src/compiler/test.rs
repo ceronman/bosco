@@ -106,7 +106,7 @@ fn program_test(source: &str, expected_out: &str) {
 fn test_hello_world() {
     program_test(
         r#"
-            fn main() int {
+            fn main() {
                 print("Hello world!")
             }
         "#,
@@ -120,7 +120,7 @@ fn test_hello_world() {
 fn test_declaration_assignment() {
     program_test(
         r#"
-            fn main() int {
+            fn main() {
                 let a int = 1
                 print_int(a)
                 a = 64
@@ -142,7 +142,7 @@ fn test_declaration_assignment() {
 fn test_expressions() {
     program_test(
         r#"
-            fn main() int {
+            fn main() {
                 let a int = 1
                 let b int = 2
                 let c int = a + b * 2 + 4
@@ -165,7 +165,7 @@ fn test_expressions() {
 fn test_if_statement() {
     program_test(
         r#"
-            fn main() int {
+            fn main() {
                 let a int = 1
                 let b int = 2
                 if a > b {
@@ -197,7 +197,7 @@ fn test_if_statement() {
 fn test_while_loop() {
     program_test(
         r#"
-            fn main() int {
+            fn main() {
                 let x int = 5
                 while x > 0 {
                     print_int(x)
@@ -221,7 +221,7 @@ fn test_while_loop() {
 fn test_scopes() {
     program_test(
         r#"
-            fn main() int {
+            fn main() {
                 let x int = 1
                 {
                     print_int(x)
@@ -243,7 +243,7 @@ fn test_scopes() {
 fn test_float() {
     program_test(
         r#"
-            fn main() int {
+            fn main() {
                 let x float = 1.0
                 let y float = 2.0
                 print_float(x / y)
@@ -259,7 +259,7 @@ fn test_float() {
 fn test_bool() {
     program_test(
         r#"
-            fn main() int {
+            fn main() {
                 let x bool = true
                 let y bool = false
                 if x or y {
@@ -277,7 +277,7 @@ fn test_bool() {
 fn test_functions() {
     program_test(
         r#"
-            fn main() int {
+            fn main() {
                 print("hello main!")
             }
 
@@ -303,127 +303,127 @@ fn assert_error(source: &str, expected: &str) {
 #[test]
 fn test_errors() {
     assert_error(
-        "fn main() int { print() }",
-        "Compilation Error: The 'print' function requires a single argument at Span(16, 23)",
+        "fn main() { print() }",
+        "Compilation Error: The 'print' function requires a single argument at Span(12, 19)",
     );
     assert_error(
-        "fn main() int { print(",
-        "Parse Error: Expected expression, got Eof at Span(22, 22)",
+        "fn main() { print(",
+        "Parse Error: Expected expression, got Eof at Span(18, 18)",
     );
     assert_error(
-        "fn main() int { x = 1 }",
-        "Compilation Error: Undeclared variable 'x' at Span(16, 17)",
+        "fn main() { x = 1 }",
+        "Compilation Error: Undeclared variable 'x' at Span(12, 13)",
     );
     assert_error(
         r#"
-            fn main() int {
+            fn main() {
                 let x int = 1
                 let x int = 2
             }
     "#,
-        "Compilation Error: Variable 'x' was already declared in this scope at Span(79, 80)",
+        "Compilation Error: Variable 'x' was already declared in this scope at Span(75, 76)",
     );
     assert_error(
-        "fn main() int { let x = 1 }",
-        "Parse Error: Type is required in declarations at Span(22, 23)",
+        "fn main() { let x = 1 }",
+        "Parse Error: Type is required in declarations at Span(18, 19)",
     );
 }
 
 #[test]
 fn test_type_errors() {
     assert_error(
-        "fn main() int { let x float = 1 }",
-        "Compilation Error: Type Error: expected Float but found Int at Span(30, 31)",
+        "fn main() { let x float = 1 }",
+        "Compilation Error: Type Error: expected Float but found Int at Span(26, 27)",
     );
     assert_error(
         r#"
-            fn main() int {
+            fn main() {
                 let x int = 1
                 let y float = x
             }
         "#,
-        "Compilation Error: Type Error: expected Float but found Int at Span(89, 90)",
+        "Compilation Error: Type Error: expected Float but found Int at Span(85, 86)",
     );
     assert_error(
         r#"
-            fn main() int {
+            fn main() {
                 let x int = 1
                 let y float = 1.5
                 let z int = x + y
             }
         "#,
-        "Compilation Error: Type Error: operator Plus has incompatible types Int and Float at Span(121, 126)",
+        "Compilation Error: Type Error: operator Plus has incompatible types Int and Float at Span(117, 122)",
     );
 
     assert_error(
         r#"
-            fn main() int {
+            fn main() {
                 let x int = 1
                 if 2 > 1 {
                     x = 1.5
                 }
             }
         "#,
-        "Compilation Error: Type Error: expected Int but found Float at Span(110, 113)",
+        "Compilation Error: Type Error: expected Int but found Float at Span(106, 109)",
     );
 
     assert_error(
         r#"
-            fn main() int {
+            fn main() {
                 let x int = 1
                 let y float = 1.5
                 let z int = x % y
             }
         "#,
-        "Compilation Error: Type Error: operator Percent has incompatible types Int and Float at Span(121, 126)",
+        "Compilation Error: Type Error: operator Percent has incompatible types Int and Float at Span(117, 122)",
     );
 
     assert_error(
         r#"
-            fn main() int {
+            fn main() {
                 let x float = 1.0
                 let y float = 1.5
                 let z int = x % y
             }
         "#,
-        "Compilation Error: Type Error: '%' operator doesn't work on floats at Span(125, 130)",
+        "Compilation Error: Type Error: '%' operator doesn't work on floats at Span(121, 126)",
     );
 
     assert_error(
-        "fn main() int { print_int(1.5) }",
-        "Compilation Error: Function 'print_int' requires an int as argument at Span(16, 30)",
+        "fn main() { print_int(1.5) }",
+        "Compilation Error: Function 'print_int' requires an int as argument at Span(12, 26)",
     );
 
     assert_error(
-        "fn main() int { print_float(1) }",
-        "Compilation Error: Function 'print_float' requires an float as argument at Span(16, 30)",
+        "fn main() { print_float(1) }",
+        "Compilation Error: Function 'print_float' requires an float as argument at Span(12, 26)",
     );
 
     assert_error(
         r#"
-            fn main() int {
+            fn main() {
                 if 1 {
                     print("hello")
                 }
             }
         "#,
-        "Compilation Error: Type Error: condition should be 'bool', but got Int at Span(48, 49)",
+        "Compilation Error: Type Error: condition should be 'bool', but got Int at Span(44, 45)",
     );
 
     assert_error(
         r#"
-            fn main() int {
+            fn main() {
                 while 0.0 {
                     print("hello")
                 }
             }
         "#,
-        "Compilation Error: Type Error: condition should be 'bool', but got Float at Span(51, 54)",
+        "Compilation Error: Type Error: condition should be 'bool', but got Float at Span(47, 50)",
     );
 
     assert_error(
         r#"
-            fn main() int {
+            fn main() {
                 let x int = 1
                 let y int = 1
                 if x or y {
@@ -431,6 +431,6 @@ fn test_type_errors() {
                 }
             }
         "#,
-        "Compilation Error: Type Error: operand should be 'bool' at Span(108, 109)",
+        "Compilation Error: Type Error: operand should be 'bool' at Span(104, 105)",
     );
 }

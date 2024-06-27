@@ -72,9 +72,14 @@ impl<'src> Parser<'src> {
             }
         }
         self.expect(TokenKind::RParen)?;
-        let return_ty = self.expect_msg(TokenKind::Identifier, |_| {
-            "Function require return type".to_string()
-        })?;
+        let return_ty = if self.token.kind == TokenKind::Identifier {
+            // TODO sounds like a helper is needed
+            let ty = self.token;
+            self.advance();
+            Some(ty)
+        } else {
+            None
+        };
         let body = self.statement()?;
         Ok(Item {
             node: self.node(fn_keyword.span, body.node.span),
@@ -388,6 +393,7 @@ impl<'src> Parser<'src> {
         self.error(msg(token))
     }
 
+    // TODO: Extract from impl and rename to parse_error
     fn error<T>(&self, msg: impl Into<String>) -> Result<T> {
         Err(ParseError {
             msg: msg.into(),

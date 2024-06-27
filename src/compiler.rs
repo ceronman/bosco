@@ -33,6 +33,7 @@ pub struct CompileError {
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum Ty {
+    Void,
     Int,
     Float,
     Bool,
@@ -42,6 +43,7 @@ impl Ty {
     // TODO: This should probably be at the parser level
     fn from_lexeme(lexeme: &str) -> Option<Ty> {
         match lexeme {
+            "void" => Some(Ty::Void),
             "int" => Some(Ty::Int),
             "float" => Some(Ty::Float),
             "bool" => Some(Ty::Bool),
@@ -101,15 +103,13 @@ impl<'src> Compiler<'src> {
         let locals = local_indices.iter().map(|l| match l.ty {
             Ty::Int | Ty::Bool => (1, ValType::I32),
             Ty::Float => (1, ValType::F64),
+            _ => panic!("This should not happen"), // TODO: Resolver should make sure that there are no void
         });
         let mut main_function = Function::new(locals);
         for item in &module.items {
             match &item.kind {
                 ItemKind::Function {
-                    name,
-                    body,
-                    params,
-                    return_ty,
+                    name, body, params, ..
                 } => {
                     let name_str = name.span.as_str(self.source);
                     if name_str != "main" {
@@ -120,12 +120,6 @@ impl<'src> Compiler<'src> {
                             "'main' function do not take arguments",
                             item.node.span,
                         );
-                    }
-                    if !matches!(
-                        Ty::from_lexeme(return_ty.span.as_str(self.source)),
-                        Some(Ty::Int)
-                    ) {
-                        return compile_error("'main' should always return int", item.node.span);
                     }
                     self.statement(&mut main_function, body)?;
                     break;
@@ -347,44 +341,26 @@ impl<'src> Compiler<'src> {
         Ok(())
     }
 
-    fn compile(&mut self, module: &Module) -> Result<Vec<u8>> {
-        let print_idx = self.import_function("js", "print", &[ValType::I32, ValType::I32], &[]);
-        self.fn_indices.insert("print", print_idx);
-        let print_idx = self.import_function("js", "print_int", &[ValType::I32], &[]);
-        self.fn_indices.insert("print_int", print_idx);
-        let print_idx = self.import_function("js", "print_float", &[ValType::F64], &[]);
-        self.fn_indices.insert("print_float", print_idx);
-        self.import_memory();
-        self.symbol_table.resolve(&module)?;
-        self.type_check(&module)?;
-        self.main(module)?;
-
-        let mut wasm_module = wasm_encoder::Module::new();
-
-        wasm_module.section(&self.types);
-        wasm_module.section(&self.imports);
-        wasm_module.section(&self.functions);
-        wasm_module.section(&self.exports);
-        wasm_module.section(&self.codes);
-        wasm_module.section(&self.data);
-
-        Ok(wasm_module.finish())
+    fn import_functions(&mut self) {
+        self.import_function("js", "print", &[ValType::I32, ValType::I32], &[]);
+        self.import_function("js", "print_int", &[ValType::I32], &[]);
+        self.import_function("js", "print_float", &[ValType::F64], &[]);
     }
 
     fn import_function(
         &mut self,
-        module: &str,
-        name: &str,
+        module: &'static str,
+        name: &'static str,
         params: &[ValType],
         results: &[ValType],
-    ) -> u32 {
+    ) {
         let type_idx = self.types.len();
         self.types
             .function(params.iter().copied(), results.iter().copied());
         let import_idx = self.imports.len();
         self.imports
             .import(module, name, EntityType::Function(type_idx));
-        import_idx
+        self.fn_indices.insert(name, import_idx);
     }
 
     fn import_memory(&mut self) {
@@ -399,6 +375,26 @@ impl<'src> Compiler<'src> {
                 page_size_log2: None,
             }),
         );
+    }
+
+    fn encode_wasm(&mut self) -> Result<Vec<u8>> {
+        let mut wasm_module = wasm_encoder::Module::new();
+        wasm_module.section(&self.types);
+        wasm_module.section(&self.imports);
+        wasm_module.section(&self.functions);
+        wasm_module.section(&self.exports);
+        wasm_module.section(&self.codes);
+        wasm_module.section(&self.data);
+        Ok(wasm_module.finish())
+    }
+
+    fn compile(&mut self, module: &Module) -> Result<Vec<u8>> {
+        self.import_functions();
+        self.import_memory();
+        self.symbol_table.resolve(&module)?;
+        self.type_check(&module)?;
+        self.main(module)?;
+        self.encode_wasm()
     }
 }
 

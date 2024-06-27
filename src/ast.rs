@@ -24,7 +24,7 @@ pub struct Item {
 pub enum ItemKind {
     Function {
         name: Token,
-        return_ty: Token,
+        return_ty: Option<Token>,
         params: Vec<Param>,
         body: Stmt,
     },
