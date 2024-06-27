@@ -2,7 +2,8 @@
 mod test;
 
 use crate::ast::{
-    Expr, ExprKind, Item, ItemKind, LiteralKind, Module, Node, NodeId, Param, Stmt, StmtKind,
+    Expr, ExprKind, Function, Item, ItemKind, LiteralKind, Module, Node, NodeId, Param, Stmt,
+    StmtKind,
 };
 use crate::lexer::{Lexer, Span, Token, TokenKind};
 use anyhow::Result;
@@ -83,12 +84,12 @@ impl<'src> Parser<'src> {
         let body = self.statement()?;
         Ok(Item {
             node: self.node(fn_keyword.span, body.node.span),
-            kind: ItemKind::Function {
+            kind: ItemKind::Function(Function {
                 name,
                 return_ty,
                 params,
                 body,
-            },
+            }),
         })
     }
 

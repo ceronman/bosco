@@ -1,26 +1,15 @@
-use crate::ast::{Expr, ExprKind, Item, ItemKind, LiteralKind, Module, Stmt, StmtKind};
+use crate::ast::{Expr, ExprKind, Function, LiteralKind, Stmt, StmtKind};
 use crate::compiler::{compile_error, Compiler, Ty};
 use crate::lexer::TokenKind;
+use anyhow::Result;
 
 impl<'src> Compiler<'src> {
-    pub(super) fn type_check(&mut self, module: &Module) -> anyhow::Result<()> {
-        for item in &module.items {
-            self.type_check_item(item)?;
-        }
+    pub(super) fn type_check_function(&mut self, function: &Function) -> Result<()> {
+        self.type_check_stmt(&function.body)?;
         Ok(())
     }
 
-    fn type_check_item(&mut self, item: &Item) -> anyhow::Result<()> {
-        //TODO: Register params & returns
-        match &item.kind {
-            ItemKind::Function { body, .. } => {
-                self.type_check_stmt(body)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn type_check_stmt(&mut self, stmt: &Stmt) -> anyhow::Result<()> {
+    fn type_check_stmt(&mut self, stmt: &Stmt) -> Result<()> {
         match &stmt.kind {
             StmtKind::Block { statements } => {
                 for stmt in statements {
@@ -116,7 +105,7 @@ impl<'src> Compiler<'src> {
         Ok(())
     }
 
-    fn type_check_expr(&mut self, expr: &Expr) -> anyhow::Result<Ty> {
+    fn type_check_expr(&mut self, expr: &Expr) -> Result<Ty> {
         let ty = match &expr.kind {
             ExprKind::Literal(LiteralKind::Int(_)) => Ty::Int,
             ExprKind::Literal(LiteralKind::Float(_)) => Ty::Float,

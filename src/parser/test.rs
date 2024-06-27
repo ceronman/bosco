@@ -1,4 +1,6 @@
-use crate::ast::{Expr, ExprKind, Item, ItemKind, LiteralKind, Module, Param, Stmt, StmtKind};
+use crate::ast::{
+    Expr, ExprKind, Function, Item, ItemKind, LiteralKind, Module, Param, Stmt, StmtKind,
+};
 use crate::lexer::Token;
 use crate::parser::parse;
 use std::fmt::{Debug, Formatter};
@@ -23,12 +25,12 @@ impl SExpr for Token {
 impl SExpr for Item {
     fn s_expr(&self, src: &str) -> String {
         match &self.kind {
-            ItemKind::Function {
+            ItemKind::Function(Function {
                 name,
                 return_ty,
                 params,
                 body,
-            } => {
+            }) => {
                 format!(
                     "(fn {} {} (ret {}) {})",
                     name.s_expr(src),

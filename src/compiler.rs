@@ -1,16 +1,15 @@
 use std::collections::HashMap;
 
+use crate::ast::{Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind};
+use crate::compiler::resolution::SymbolTable;
+use crate::lexer::{Span, Token, TokenKind};
+use crate::parser::parse;
 use anyhow::Result;
 use thiserror::Error;
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
-    Function, FunctionSection, ImportSection, Instruction, MemoryType, TypeSection, ValType,
+    FunctionSection, ImportSection, Instruction, MemoryType, TypeSection, ValType,
 };
-
-use crate::ast::{Expr, ExprKind, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind};
-use crate::compiler::resolution::SymbolTable;
-use crate::lexer::{Span, Token, TokenKind};
-use crate::parser::parse;
 
 mod resolution;
 #[cfg(test)]
@@ -41,13 +40,23 @@ pub enum Ty {
 
 impl Ty {
     // TODO: This should probably be at the parser level
-    fn from_lexeme(lexeme: &str) -> Option<Ty> {
+    fn from_lexeme(token: &Token, source: &str) -> Result<Ty> {
+        let lexeme = token.span.as_str(source);
         match lexeme {
-            "void" => Some(Ty::Void),
-            "int" => Some(Ty::Int),
-            "float" => Some(Ty::Float),
-            "bool" => Some(Ty::Bool),
-            _ => None,
+            "void" => Ok(Ty::Void),
+            "int" => Ok(Ty::Int),
+            "float" => Ok(Ty::Float),
+            "bool" => Ok(Ty::Bool),
+            _ => compile_error(format!("Unknown type {lexeme}"), token.span),
+        }
+    }
+
+    fn as_wasm(&self) -> ValType {
+        match self {
+            Ty::Void => panic!("Should not happen"), // TODO: Remove this possibility
+            Ty::Int => ValType::I32,
+            Ty::Float => ValType::F32,
+            Ty::Bool => ValType::I32,
         }
     }
 }
@@ -93,11 +102,29 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn main(&mut self, module: &Module) -> Result<()> {
+    fn function(&mut self, function: &Function) -> Result<()> {
+        // Declare type
+        let mut params = Vec::new();
+        for param in &function.params {
+            let ty = Ty::from_lexeme(&param.ty, self.source)?;
+            params.push(ty.as_wasm())
+        }
+        let returns: &[ValType] = if let Some(return_ty) = function.return_ty {
+            &[Ty::from_lexeme(&return_ty, self.source)?.as_wasm()]
+        } else {
+            &[]
+        };
         let type_index = self.types.len();
-        self.types.function(vec![], vec![]);
-        let main_fn_index = self.imports.len() - 1;
+        self.types.function(params, returns.iter().copied());
         self.functions.function(type_index);
+
+        // Resolve
+        self.symbol_table = SymbolTable::new(self.source);
+        self.symbol_table.resolve_function(function)?;
+
+        self.type_check_function(function)?;
+
+        // Calculate locals
         let mut local_indices = self.symbol_table.locals().collect::<Vec<_>>();
         local_indices.sort_by_key(|l| l.index);
         let locals = local_indices.iter().map(|l| match l.ty {
@@ -105,35 +132,68 @@ impl<'src> Compiler<'src> {
             Ty::Float => (1, ValType::F64),
             _ => panic!("This should not happen"), // TODO: Resolver should make sure that there are no void
         });
-        let mut main_function = Function::new(locals);
-        for item in &module.items {
-            match &item.kind {
-                ItemKind::Function {
-                    name, body, params, ..
-                } => {
-                    let name_str = name.span.as_str(self.source);
-                    if name_str != "main" {
-                        continue;
-                    }
-                    if params.len() > 0 {
-                        return compile_error(
-                            "'main' function do not take arguments",
-                            item.node.span,
-                        );
-                    }
-                    self.statement(&mut main_function, body)?;
-                    break;
-                }
-            }
-        }
-        main_function.instruction(&Instruction::End);
-        self.codes.function(&main_function);
+        let mut wasm_function = wasm_encoder::Function::new(locals);
+        self.statement(&mut wasm_function, &function.body)?;
+        wasm_function.instruction(&Instruction::End);
+        self.codes.function(&wasm_function);
+
+        // Export
+        let main_fn_index = self.imports.len() - 1;
         self.exports
             .export("hello", ExportKind::Func, main_fn_index);
         Ok(())
     }
 
-    fn statement(&mut self, func: &mut Function, stmt: &Stmt) -> Result<()> {
+    fn module(&mut self, module: &Module) -> Result<()> {
+        for item in &module.items {
+            match &item.kind {
+                ItemKind::Function(function) => {
+                    self.function(function)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // fn main(&mut self, module: &Module) -> Result<()> {
+    //     let type_index = self.types.len();
+    //     self.types.function(vec![], vec![]);
+    //     let main_fn_index = self.imports.len() - 1;
+    //     self.functions.function(type_index);
+    //     let mut local_indices = self.symbol_table.locals().collect::<Vec<_>>();
+    //     local_indices.sort_by_key(|l| l.index);
+    //     let locals = local_indices.iter().map(|l| match l.ty {
+    //         Ty::Int | Ty::Bool => (1, ValType::I32),
+    //         Ty::Float => (1, ValType::F64),
+    //         _ => panic!("This should not happen"), // TODO: Resolver should make sure that there are no void
+    //     });
+    //     let mut main_function = wasm_encoder::Function::new(locals);
+    //     for item in &module.items {
+    //         match &item.kind {
+    //             ItemKind::Function(Function { name, body, params, .. }) => {
+    //                 let name_str = name.span.as_str(self.source);
+    //                 if name_str != "main" {
+    //                     continue;
+    //                 }
+    //                 if params.len() > 0 {
+    //                     return compile_error(
+    //                         "'main' function do not take arguments",
+    //                         item.node.span,
+    //                     );
+    //                 }
+    //                 self.statement(&mut main_function, body)?;
+    //                 break;
+    //             }
+    //         }
+    //     }
+    //     main_function.instruction(&Instruction::End);
+    //     self.codes.function(&main_function);
+    //     self.exports
+    //         .export("hello", ExportKind::Func, main_fn_index);
+    //     Ok(())
+    // }
+
+    fn statement(&mut self, func: &mut wasm_encoder::Function, stmt: &Stmt) -> Result<()> {
         match &stmt.kind {
             StmtKind::Block { statements } => {
                 for statement in statements {
@@ -223,7 +283,7 @@ impl<'src> Compiler<'src> {
         Ok(())
     }
 
-    fn expression(&mut self, func: &mut Function, expr: &Expr) -> Result<()> {
+    fn expression(&mut self, func: &mut wasm_encoder::Function, expr: &Expr) -> Result<()> {
         match &expr.kind {
             ExprKind::Literal(LiteralKind::Int(value)) => {
                 func.instruction(&Instruction::I32Const(*value));
@@ -391,9 +451,7 @@ impl<'src> Compiler<'src> {
     fn compile(&mut self, module: &Module) -> Result<Vec<u8>> {
         self.import_functions();
         self.import_memory();
-        self.symbol_table.resolve(&module)?;
-        self.type_check(&module)?;
-        self.main(module)?;
+        self.module(module)?;
         self.encode_wasm()
     }
 }

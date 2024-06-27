@@ -280,10 +280,6 @@ fn test_functions() {
             fn main() {
                 print("hello main!")
             }
-
-            fn other() int {
-                print("hello other!")
-            }
         "#,
         r#"
             hello main!

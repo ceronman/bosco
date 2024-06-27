@@ -21,13 +21,16 @@ pub struct Item {
 }
 
 #[derive(Debug)]
+pub struct Function {
+    pub name: Token,
+    pub return_ty: Option<Token>,
+    pub params: Vec<Param>,
+    pub body: Stmt,
+}
+
+#[derive(Debug)]
 pub enum ItemKind {
-    Function {
-        name: Token,
-        return_ty: Option<Token>,
-        params: Vec<Param>,
-        body: Stmt,
-    },
+    Function(Function),
 }
 
 #[derive(Debug)]

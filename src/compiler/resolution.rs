@@ -1,9 +1,10 @@
 use std::collections::{HashMap, VecDeque};
 
-use crate::ast::{Expr, ExprKind, Item, ItemKind, Module, Stmt, StmtKind};
+use anyhow::Result;
+
+use crate::ast::{Expr, ExprKind, Function, Stmt, StmtKind};
 use crate::compiler::{compile_error, LocalVar, Ty};
 use crate::lexer::Token;
-use anyhow::Result;
 
 pub(super) struct SymbolTable<'src> {
     source: &'src str,
@@ -36,11 +37,10 @@ impl<'src> SymbolTable<'src> {
                 name_token.span,
             );
         }
-        let ty_name = ty_token.span.as_str(self.source);
-        let Some(ty) = Ty::from_lexeme(ty_name) else {
-            return compile_error(format!("Unknown type {ty_name}"), ty_token.span);
+        let local_var = LocalVar {
+            index,
+            ty: Ty::from_lexeme(ty_token, self.source)?,
         };
-        let local_var = LocalVar { index, ty };
         env.insert(name.into(), local_var);
         self.locals.insert(*name_token, local_var);
         Ok(index)
@@ -77,21 +77,8 @@ impl<'src> SymbolTable<'src> {
         self.locals.values().copied()
     }
 
-    pub(super) fn resolve(&mut self, module: &Module) -> Result<()> {
-        for item in &module.items {
-            self.resolve_item(item)?;
-        }
-        Ok(())
-    }
-
-    fn resolve_item(&mut self, item: &Item) -> Result<()> {
-        match &item.kind {
-            // TODO: Resolve parameters
-            ItemKind::Function { body, .. } => {
-                self.resolve_stmt(body)?;
-            }
-        }
-        Ok(())
+    pub(super) fn resolve_function(&mut self, function: &Function) -> Result<()> {
+        self.resolve_stmt(&function.body)
     }
 
     fn resolve_stmt(&mut self, statement: &Stmt) -> Result<()> {
