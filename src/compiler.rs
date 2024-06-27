@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use anyhow::Result;
 use thiserror::Error;
@@ -7,12 +7,15 @@ use wasm_encoder::{
     Function, FunctionSection, ImportSection, Instruction, MemoryType, TypeSection, ValType,
 };
 
-use crate::ast::{Expr, ExprKind, Item, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind};
+use crate::ast::{Expr, ExprKind, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind};
+use crate::compiler::resolution::SymbolTable;
 use crate::lexer::{Span, Token, TokenKind};
 use crate::parser::parse;
 
+mod resolution;
 #[cfg(test)]
 mod test;
+mod typecheck;
 
 #[derive(Clone, Copy)]
 struct WasmStr {
@@ -53,91 +56,6 @@ struct LocalVar {
     ty: Ty,
 }
 
-struct SymbolTable<'src> {
-    source: &'src str,
-    environments: VecDeque<HashMap<String, LocalVar>>, // TODO: Use interned strings instead
-    locals: HashMap<Token, LocalVar>,
-}
-
-impl<'src> SymbolTable<'src> {
-    fn new(source: &'src str) -> Self {
-        SymbolTable {
-            source,
-            environments: Default::default(),
-            locals: Default::default(),
-        }
-    }
-
-    fn declare(&mut self, name_token: &Token, ty_token: &Token) -> Result<u32> {
-        let index: u32 = self.locals.len().try_into()?;
-        let name = name_token.span.as_str(self.source);
-        let Some(env) = self.environments.front_mut() else {
-            return Err(CompileError {
-                msg: format!("Variable '{name}' was declared outside of any scope"),
-                span: name_token.span,
-            }
-            .into());
-        };
-
-        if env.contains_key(name) {
-            return Err(CompileError {
-                msg: format!("Variable '{name}' was already declared in this scope"),
-                span: name_token.span,
-            }
-            .into());
-        }
-        let ty_name = ty_token.span.as_str(self.source);
-        let Some(ty) = Ty::from_lexeme(ty_name) else {
-            return Err(CompileError {
-                msg: format!("Unknown type {ty_name}"),
-                span: ty_token.span,
-            }
-            .into());
-        };
-        let local_var = LocalVar { index, ty };
-        env.insert(name.into(), local_var);
-        self.locals.insert(*name_token, local_var);
-        Ok(index)
-    }
-
-    fn resolve_var(&mut self, token: &Token) -> Result<()> {
-        let name = token.span.as_str(self.source);
-        for env in &self.environments {
-            if let Some(&index) = env.get(name) {
-                self.locals.insert(*token, index);
-                return Ok(());
-            }
-        }
-        Err(CompileError {
-            msg: format!("Undeclared variable '{name}'"),
-            span: token.span,
-        }
-        .into())
-    }
-
-    fn lookup_var(&self, token: &Token) -> Result<LocalVar> {
-        let name = token.span.as_str(self.source);
-        self.locals
-            .get(token)
-            .ok_or(
-                CompileError {
-                    msg: format!("Undeclared variable '{name}'"),
-                    span: token.span,
-                }
-                .into(),
-            )
-            .copied()
-    }
-
-    fn begin_scope(&mut self) {
-        self.environments.push_front(Default::default())
-    }
-
-    fn end_scope(&mut self) {
-        self.environments.pop_front();
-    }
-}
-
 struct Compiler<'src> {
     source: &'src str,
     strings: HashMap<Token, WasmStr>,
@@ -173,291 +91,12 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn error<T>(&self, msg: impl Into<String>, span: Span) -> Result<T> {
-        Err(CompileError {
-            msg: msg.into(),
-            span,
-        }
-        .into())
-    }
-
-    fn resolve(&mut self, module: &Module) -> Result<()> {
-        for item in &module.items {
-            self.resolve_item(item)?;
-        }
-        Ok(())
-    }
-
-    fn resolve_item(&mut self, item: &Item) -> Result<()> {
-        match &item.kind {
-            // TODO: Resolve parameters
-            ItemKind::Function { body, .. } => {
-                self.resolve_stmt(body)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn resolve_stmt(&mut self, statement: &Stmt) -> Result<()> {
-        match &statement.kind {
-            StmtKind::Block { statements } => {
-                self.symbol_table.begin_scope();
-                for statement in statements {
-                    self.resolve_stmt(statement)?
-                }
-                self.symbol_table.end_scope();
-            }
-            StmtKind::Call { callee: _, args } => {
-                for arg in args {
-                    self.resolve_expression(arg)?;
-                }
-            }
-            StmtKind::Declaration { name, ty, value } => {
-                self.symbol_table.declare(name, ty)?;
-                if let Some(value) = value {
-                    self.resolve_expression(value)?;
-                }
-            }
-
-            StmtKind::Assignment { name, value } => {
-                self.symbol_table.resolve_var(name)?;
-                self.resolve_expression(value)?;
-            }
-
-            StmtKind::If {
-                condition,
-                then_block,
-                else_block,
-            } => {
-                self.resolve_expression(condition)?;
-                self.resolve_stmt(then_block)?;
-                else_block.as_ref().map(|b| self.resolve_stmt(b));
-            }
-
-            StmtKind::While { condition, body } => {
-                self.resolve_expression(condition)?;
-                self.resolve_stmt(body)?
-            }
-        }
-        Ok(())
-    }
-
-    fn resolve_expression(&mut self, expr: &Expr) -> Result<()> {
-        match &expr.kind {
-            ExprKind::Literal(LiteralKind::String { token, value }) => {
-                let wasm_str = WasmStr {
-                    memory: Compiler::MEM,
-                    offset: self.data_offset,
-                    len: value.len() as u32,
-                };
-                self.data_offset += wasm_str.len;
-                self.strings.insert(*token, wasm_str);
-                self.data.active(
-                    wasm_str.memory,
-                    &ConstExpr::i32_const(wasm_str.offset as i32),
-                    value.bytes(),
-                );
-            }
-            ExprKind::Literal(_) => {}
-            ExprKind::Variable { name } => self.symbol_table.resolve_var(name)?,
-            ExprKind::Binary { left, right, .. }
-            | ExprKind::Or { left, right, .. }
-            | ExprKind::And { left, right, .. } => {
-                self.resolve_expression(left)?;
-                self.resolve_expression(right)?;
-            }
-            ExprKind::Not { right } => self.resolve_expression(right)?,
-        }
-        Ok(())
-    }
-
-    fn type_check(&mut self, module: &Module) -> Result<()> {
-        for item in &module.items {
-            self.type_check_item(item)?;
-        }
-        Ok(())
-    }
-
-    fn type_check_item(&mut self, item: &Item) -> Result<()> {
-        //TODO: Register params & returns
-        match &item.kind {
-            ItemKind::Function { body, .. } => {
-                self.type_check_stmt(body)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn type_check_stmt(&mut self, stmt: &Stmt) -> Result<()> {
-        match &stmt.kind {
-            StmtKind::Block { statements } => {
-                for stmt in statements {
-                    self.type_check_stmt(stmt)?
-                }
-            }
-            StmtKind::Call { callee, args } => {
-                let callee_name = callee.span.as_str(self.source);
-                if args.len() != 1 {
-                    return self.error(
-                        format!("The '{callee_name}' function requires a single argument"),
-                        stmt.node.span,
-                    );
-                }
-                let arg_ty = self.type_check_expr(&args[0])?;
-                match callee_name {
-                    "print" => {} // TODO: Strings
-                    "print_int" => {
-                        if arg_ty != Ty::Int {
-                            return self.error(
-                                "Function 'print_int' requires an int as argument",
-                                stmt.node.span,
-                            );
-                        }
-                    }
-                    "print_float" => {
-                        if arg_ty != Ty::Float {
-                            return self.error(
-                                "Function 'print_float' requires an float as argument",
-                                stmt.node.span,
-                            );
-                        }
-                    }
-
-                    _ => {
-                        return self
-                            .error(format!("Unknown function '{callee_name}'"), stmt.node.span)
-                    } // TODO: duplicated error in compilation
-                }
-            }
-            StmtKind::Declaration { name, value, .. } => {
-                let var_ty = self.symbol_table.lookup_var(name)?.ty;
-                if let Some(value) = value {
-                    let initializer_ty = self.type_check_expr(value)?;
-                    if initializer_ty != var_ty {
-                        return self.error(
-                            format!("Type Error: expected {var_ty:?} but found {initializer_ty:?}"),
-                            value.node.span,
-                        );
-                    }
-                }
-            }
-            StmtKind::Assignment { name, value } => {
-                let var_ty = self.symbol_table.lookup_var(name)?.ty;
-                let initializer_ty = self.type_check_expr(value)?;
-                if initializer_ty != var_ty {
-                    return self.error(
-                        format!("Type Error: expected {var_ty:?} but found {initializer_ty:?}"),
-                        value.node.span,
-                    );
-                }
-            }
-            StmtKind::If {
-                condition,
-                then_block,
-                else_block,
-            } => {
-                let condition_ty = self.type_check_expr(condition)?;
-                if condition_ty != Ty::Bool {
-                    return self.error(
-                        format!("Type Error: condition should be 'bool', but got {condition_ty:?}"),
-                        condition.node.span,
-                    );
-                }
-                self.type_check_stmt(then_block)?;
-                if let Some(e) = else_block {
-                    self.type_check_stmt(e)?;
-                }
-            }
-            StmtKind::While { condition, body } => {
-                let condition_ty = self.type_check_expr(condition)?;
-                if condition_ty != Ty::Bool {
-                    return self.error(
-                        format!("Type Error: condition should be 'bool', but got {condition_ty:?}"),
-                        condition.node.span,
-                    );
-                }
-                self.type_check_stmt(body)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn type_check_expr(&mut self, expr: &Expr) -> Result<Ty> {
-        let ty = match &expr.kind {
-            ExprKind::Literal(LiteralKind::Int(_)) => Ty::Int,
-            ExprKind::Literal(LiteralKind::Float(_)) => Ty::Float,
-            ExprKind::Literal(LiteralKind::String { .. }) => Ty::Int, // TODO: Fix me!
-            ExprKind::Literal(LiteralKind::Bool(_)) => Ty::Bool,      // TODO: Fix me!
-            ExprKind::Variable { name } => {
-                let local_var = self.symbol_table.lookup_var(name)?;
-                local_var.ty
-            }
-            ExprKind::Binary {
-                left,
-                right,
-                operator,
-            } => {
-                let left_ty = self.type_check_expr(left)?;
-                let right_ty = self.type_check_expr(right)?;
-                if left_ty != right_ty {
-                    return self.error(
-                        format!("Type Error: operator {:?} has incompatible types {left_ty:?} and {right_ty:?}", operator.kind),
-                        expr.node.span,
-                    );
-                }
-
-                if operator.kind == TokenKind::Percent && left_ty == Ty::Float {
-                    return self.error(
-                        "Type Error: '%' operator doesn't work on floats",
-                        expr.node.span,
-                    );
-                }
-
-                match operator.kind {
-                    TokenKind::LessEqual
-                    | TokenKind::Less
-                    | TokenKind::EqualEqual
-                    | TokenKind::BangEqual
-                    | TokenKind::GreaterEqual
-                    | TokenKind::Greater => Ty::Bool,
-                    _ => left_ty,
-                }
-            }
-            ExprKind::Or { left, right } | ExprKind::And { left, right } => {
-                let left_ty = self.type_check_expr(left)?;
-
-                if left_ty != Ty::Bool {
-                    return self.error("Type Error: operand should be 'bool'", left.node.span);
-                }
-                let right_ty = self.type_check_expr(right)?;
-                if right_ty != Ty::Bool {
-                    return self.error("Type Error: operand should be 'bool'", right.node.span);
-                }
-                Ty::Bool
-            }
-            ExprKind::Not { right } => {
-                let right_ty = self.type_check_expr(right)?;
-                if right_ty != Ty::Bool {
-                    return self.error("Type Error: operand should be 'bool'", right.node.span);
-                }
-                Ty::Bool
-            }
-        };
-        self.expression_types.insert(expr.node.id, ty);
-        Ok(ty)
-    }
-
     fn main(&mut self, module: &Module) -> Result<()> {
         let type_index = self.types.len();
         self.types.function(vec![], vec![]);
         let main_fn_index = self.imports.len() - 1;
         self.functions.function(type_index);
-        let mut local_indices = self
-            .symbol_table
-            .locals
-            .values()
-            .copied()
-            .collect::<Vec<_>>();
+        let mut local_indices = self.symbol_table.locals().collect::<Vec<_>>();
         local_indices.sort_by_key(|l| l.index);
         let locals = local_indices.iter().map(|l| match l.ty {
             Ty::Int | Ty::Bool => (1, ValType::I32),
@@ -477,13 +116,16 @@ impl<'src> Compiler<'src> {
                         continue;
                     }
                     if params.len() > 0 {
-                        return self.error("'main' function do not take arguments", item.node.span);
+                        return compile_error(
+                            "'main' function do not take arguments",
+                            item.node.span,
+                        );
                     }
                     if !matches!(
                         Ty::from_lexeme(return_ty.span.as_str(self.source)),
                         Some(Ty::Int)
                     ) {
-                        return self.error("'main' should always return int", item.node.span);
+                        return compile_error("'main' should always return int", item.node.span);
                     }
                     self.statement(&mut main_function, body)?;
                     break;
@@ -507,7 +149,7 @@ impl<'src> Compiler<'src> {
             StmtKind::Call { callee, args, .. } => {
                 let callee_name = callee.span.as_str(self.source);
                 let Some(&callee) = self.fn_indices.get(callee_name) else {
-                    return self.error(
+                    return compile_error(
                         format!("Function '{callee_name}' not found!"),
                         stmt.node.span,
                     );
@@ -516,15 +158,19 @@ impl<'src> Compiler<'src> {
                 match callee_name {
                     "print" => {
                         // NOTE Args are already checked in type check
+                        self.expression(func, &args[0])?; // Needed to add the string value
                         if let ExprKind::Literal(LiteralKind::String { token, .. }) = args[0].kind {
                             let Some(was_str) = self.strings.get(&token) else {
-                                return self.error("String constant not found", token.span);
+                                return compile_error("String constant not found", token.span);
                             };
                             func.instruction(&Instruction::I32Const(was_str.offset as i32));
                             func.instruction(&Instruction::I32Const(was_str.len as i32));
                             func.instruction(&Instruction::Call(callee));
                         } else {
-                            return self.error("Incorrect arguments for 'print'!", stmt.node.span);
+                            return compile_error(
+                                "Incorrect arguments for 'print'!",
+                                stmt.node.span,
+                            );
                         }
                     }
                     "print_int" | "print_float" => {
@@ -533,8 +179,10 @@ impl<'src> Compiler<'src> {
                         func.instruction(&Instruction::Call(callee));
                     }
                     _ => {
-                        return self
-                            .error(format!("Unknown function '{callee_name}'"), stmt.node.span)
+                        return compile_error(
+                            format!("Unknown function '{callee_name}'"),
+                            stmt.node.span,
+                        )
                     }
                 }
             }
@@ -543,7 +191,7 @@ impl<'src> Compiler<'src> {
                 if let Some(value) = value {
                     let local_var = self.symbol_table.lookup_var(name)?;
                     self.expression(func, value)?; // TODO: Define what to do when declared var is used in initializer
-                    func.instruction(&Instruction::LocalSet(local_var.index));   
+                    func.instruction(&Instruction::LocalSet(local_var.index));
                 }
             }
 
@@ -596,8 +244,19 @@ impl<'src> Compiler<'src> {
             ExprKind::Literal(LiteralKind::Float(value)) => {
                 func.instruction(&Instruction::F64Const(*value));
             }
-            ExprKind::Literal(LiteralKind::String { .. }) => {
-                todo!("Literal strings are not implemented")
+            ExprKind::Literal(LiteralKind::String { token, value }) => {
+                let wasm_str = WasmStr {
+                    memory: Compiler::MEM,
+                    offset: self.data_offset,
+                    len: value.len() as u32,
+                };
+                self.data_offset += wasm_str.len;
+                self.strings.insert(*token, wasm_str);
+                self.data.active(
+                    wasm_str.memory,
+                    &ConstExpr::i32_const(wasm_str.offset as i32),
+                    value.bytes(),
+                );
             }
             ExprKind::Binary {
                 left,
@@ -608,7 +267,7 @@ impl<'src> Compiler<'src> {
                 self.expression(func, right)?;
 
                 let Some(&ty) = self.expression_types.get(&left.node.id) else {
-                    return self.error("Fatal: Not type found for expression", left.node.span);
+                    return compile_error("Fatal: Not type found for expression", left.node.span);
                 };
 
                 // TODO: Not deal with tokens here?
@@ -645,7 +304,7 @@ impl<'src> Compiler<'src> {
 
                     (TokenKind::Percent, Ty::Int) => Instruction::I32RemS,
                     _ => {
-                        return self.error(
+                        return compile_error(
                             format!(
                                 "Operator '{:?}' is not supported for type {ty:?}",
                                 operator.kind
@@ -696,9 +355,7 @@ impl<'src> Compiler<'src> {
         let print_idx = self.import_function("js", "print_float", &[ValType::F64], &[]);
         self.fn_indices.insert("print_float", print_idx);
         self.import_memory();
-        self.symbol_table.begin_scope();
-        self.resolve(&module)?;
-        self.symbol_table.end_scope();
+        self.symbol_table.resolve(&module)?;
         self.type_check(&module)?;
         self.main(module)?;
 
@@ -743,6 +400,14 @@ impl<'src> Compiler<'src> {
             }),
         );
     }
+}
+
+fn compile_error<T>(msg: impl Into<String>, span: Span) -> Result<T> {
+    Err(CompileError {
+        msg: msg.into(),
+        span,
+    }
+    .into())
 }
 
 pub fn compile(source: &str) -> Result<Vec<u8>> {
