@@ -267,7 +267,14 @@ fn control_flow() {
 
 #[test]
 fn functions() {
-    test_lexer(r#"
-        export fn main() {}
-    "#, vec![Eol, Export, Fn, Identifier, LParen, RParen, LBrace, RBrace, Eol], true);
+    test_lexer(
+        r#"
+        export fn foo() int { return 0 }
+    "#,
+        vec![
+            Eol, Export, Fn, Identifier, LParen, RParen, Identifier, LBrace, Return, Int, RBrace,
+            Eol,
+        ],
+        true,
+    );
 }

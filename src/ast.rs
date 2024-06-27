@@ -10,7 +10,7 @@ pub struct Node {
 
 #[derive(Debug)]
 pub struct Module {
-    pub node: Node,
+    pub _node: Node,
     pub items: Vec<Item>,
 }
 
@@ -36,7 +36,7 @@ pub enum ItemKind {
 
 #[derive(Debug)]
 pub struct Param {
-    pub node: Node,
+    pub _node: Node,
     pub name: Token,
     pub ty: Token,
 }
@@ -73,6 +73,9 @@ pub enum StmtKind {
     While {
         condition: Expr,
         body: Box<Stmt>,
+    },
+    Return {
+        expr: Expr,
     },
 }
 

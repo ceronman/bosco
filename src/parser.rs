@@ -45,7 +45,7 @@ impl<'src> Parser<'src> {
         let start = items.first().map(|i| i.node.span).unwrap_or(Span(0, 0));
         let end = items.last().map(|i| i.node.span).unwrap_or(Span(0, 0));
         Ok(Module {
-            node: self.node(start, end),
+            _node: self.node(start, end),
             items,
         })
     }
@@ -99,7 +99,7 @@ impl<'src> Parser<'src> {
         let name = self.expect(TokenKind::Identifier)?;
         let ty = self.expect(TokenKind::Identifier)?;
         Ok(Param {
-            node: self.node(name.span, ty.span),
+            _node: self.node(name.span, ty.span),
             name,
             ty,
         })
@@ -112,6 +112,7 @@ impl<'src> Parser<'src> {
             TokenKind::Let => self.declaration(),
             TokenKind::If => self.if_statement(),
             TokenKind::While => self.while_statement(),
+            TokenKind::Return => self.return_statement(),
             TokenKind::Identifier => match self.peek().kind {
                 TokenKind::LParen => self.call(),
                 TokenKind::Equal => self.assignment(),
@@ -352,6 +353,15 @@ impl<'src> Parser<'src> {
                 condition,
                 body: Box::new(body),
             },
+        })
+    }
+
+    fn return_statement(&mut self) -> Result<Stmt> {
+        let return_kw = self.expect(TokenKind::Return)?;
+        let expr = self.expression()?;
+        Ok(Stmt {
+            node: self.node(return_kw.span, expr.node.span),
+            kind: StmtKind::Return { expr },
         })
     }
 

@@ -67,11 +67,22 @@ struct LocalVar {
     ty: Ty,
 }
 
+struct Counter(u32);
+
+impl Counter {
+    fn next(&mut self) -> u32 {
+        let current = self.0;
+        self.0 += 1;
+        current
+    }
+}
+
 struct Compiler<'src> {
     source: &'src str,
     strings: HashMap<Token, WasmStr>,
     symbol_table: SymbolTable<'src>,
-    fn_indices: HashMap<&'static str, u32>,
+    fn_indices: HashMap<&'src str, u32>,
+    fn_counter: Counter,
     expression_types: HashMap<NodeId, Ty>,
     types: TypeSection,
     functions: FunctionSection,
@@ -91,6 +102,7 @@ impl<'src> Compiler<'src> {
             strings: Default::default(),
             symbol_table: SymbolTable::new(source),
             fn_indices: Default::default(),
+            fn_counter: Counter(0),
             expression_types: Default::default(),
             types: Default::default(),
             functions: Default::default(),
@@ -137,10 +149,15 @@ impl<'src> Compiler<'src> {
         wasm_function.instruction(&Instruction::End);
         self.codes.function(&wasm_function);
 
+        // Register
+        let fn_index = self.fn_counter.next();
+        let name = function.name.span.as_str(self.source);
+        self.fn_indices.insert(name, fn_index);
+
         // Export
-        let main_fn_index = self.imports.len() - 1;
-        self.exports
-            .export("hello", ExportKind::Func, main_fn_index);
+        if function.exported {
+            self.exports.export(name, ExportKind::Func, fn_index);
+        }
         Ok(())
     }
 
@@ -154,44 +171,6 @@ impl<'src> Compiler<'src> {
         }
         Ok(())
     }
-
-    // fn main(&mut self, module: &Module) -> Result<()> {
-    //     let type_index = self.types.len();
-    //     self.types.function(vec![], vec![]);
-    //     let main_fn_index = self.imports.len() - 1;
-    //     self.functions.function(type_index);
-    //     let mut local_indices = self.symbol_table.locals().collect::<Vec<_>>();
-    //     local_indices.sort_by_key(|l| l.index);
-    //     let locals = local_indices.iter().map(|l| match l.ty {
-    //         Ty::Int | Ty::Bool => (1, ValType::I32),
-    //         Ty::Float => (1, ValType::F64),
-    //         _ => panic!("This should not happen"), // TODO: Resolver should make sure that there are no void
-    //     });
-    //     let mut main_function = wasm_encoder::Function::new(locals);
-    //     for item in &module.items {
-    //         match &item.kind {
-    //             ItemKind::Function(Function { name, body, params, .. }) => {
-    //                 let name_str = name.span.as_str(self.source);
-    //                 if name_str != "main" {
-    //                     continue;
-    //                 }
-    //                 if params.len() > 0 {
-    //                     return compile_error(
-    //                         "'main' function do not take arguments",
-    //                         item.node.span,
-    //                     );
-    //                 }
-    //                 self.statement(&mut main_function, body)?;
-    //                 break;
-    //             }
-    //         }
-    //     }
-    //     main_function.instruction(&Instruction::End);
-    //     self.codes.function(&main_function);
-    //     self.exports
-    //         .export("hello", ExportKind::Func, main_fn_index);
-    //     Ok(())
-    // }
 
     fn statement(&mut self, func: &mut wasm_encoder::Function, stmt: &Stmt) -> Result<()> {
         match &stmt.kind {
@@ -278,6 +257,10 @@ impl<'src> Compiler<'src> {
                 func.instruction(&Instruction::Br(1)); // 1 refers to the loop instruction
                 func.instruction(&Instruction::End); // End of if
                 func.instruction(&Instruction::End); // End of loop
+            }
+
+            StmtKind::Return { expr } => {
+                self.expression(func, expr)?; // TODO: Check no more statements after last return
             }
         }
         Ok(())
@@ -417,10 +400,9 @@ impl<'src> Compiler<'src> {
         let type_idx = self.types.len();
         self.types
             .function(params.iter().copied(), results.iter().copied());
-        let import_idx = self.imports.len();
         self.imports
             .import(module, name, EntityType::Function(type_idx));
-        self.fn_indices.insert(name, import_idx);
+        self.fn_indices.insert(name, self.fn_counter.next());
     }
 
     fn import_memory(&mut self) {

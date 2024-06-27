@@ -37,7 +37,11 @@ impl SExpr for Item {
                     if *exported { "export" } else { "" }.to_string(),
                     name.s_expr(src),
                     params.s_expr(src),
-                    if let Some(ty) = return_ty { ty.s_expr(src) } else { "void".into() },
+                    if let Some(ty) = return_ty {
+                        ty.s_expr(src)
+                    } else {
+                        "void".into()
+                    },
                     body.s_expr(src)
                 )
             }
@@ -85,6 +89,10 @@ impl SExpr for Stmt {
 
             StmtKind::While { condition, body } => {
                 format!("(while {} ({}))", condition.s_expr(src), body.s_expr(src))
+            }
+
+            StmtKind::Return { expr } => {
+                format!("(return {})", expr.s_expr(src))
             }
         }
     }
@@ -258,17 +266,19 @@ macro_rules! test_main {
 }
 
 #[test]
-fn test_hello_world() {
+fn test_function() {
     test_parser! {
         r#"
             export fn main() int {
                 print("Hello world!")
+                return 1
             }
         "#,
         (module
             (export fn main (ret int)
                 (
                     (call print "Hello world!")
+                    (return 1)
                 )
             )
         )

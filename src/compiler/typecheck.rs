@@ -101,6 +101,11 @@ impl<'src> Compiler<'src> {
                 }
                 self.type_check_stmt(body)?;
             }
+
+            StmtKind::Return { expr } => {
+                self.type_check_expr(expr)?;
+                // TODO: Check that matches current function
+            }
         }
         Ok(())
     }

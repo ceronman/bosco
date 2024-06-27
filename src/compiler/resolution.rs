@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 
 use anyhow::Result;
 
-use crate::ast::{Expr, ExprKind, Function, Stmt, StmtKind};
+use crate::ast::{Expr, ExprKind, Function, Param, Stmt, StmtKind};
 use crate::compiler::{compile_error, LocalVar, Ty};
 use crate::lexer::Token;
 
@@ -78,7 +78,13 @@ impl<'src> SymbolTable<'src> {
     }
 
     pub(super) fn resolve_function(&mut self, function: &Function) -> Result<()> {
-        self.resolve_stmt(&function.body)
+        self.begin_scope(); // TODO: Double because of blocks
+        for Param { name, ty, .. } in &function.params {
+            self.declare(name, ty)?;
+        }
+        self.resolve_stmt(&function.body)?;
+        self.end_scope();
+        Ok(())
     }
 
     fn resolve_stmt(&mut self, statement: &Stmt) -> Result<()> {
@@ -120,6 +126,10 @@ impl<'src> SymbolTable<'src> {
             StmtKind::While { condition, body } => {
                 self.resolve_expression(condition)?;
                 self.resolve_stmt(body)?
+            }
+
+            StmtKind::Return { expr } => {
+                self.resolve_expression(expr)?;
             }
         }
         Ok(())
