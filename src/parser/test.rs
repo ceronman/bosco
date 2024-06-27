@@ -26,20 +26,18 @@ impl SExpr for Item {
     fn s_expr(&self, src: &str) -> String {
         match &self.kind {
             ItemKind::Function(Function {
+                exported,
                 name,
                 return_ty,
                 params,
                 body,
             }) => {
                 format!(
-                    "(fn {} {} (ret {}) {})",
+                    "({} fn {} {} (ret {}) {})",
+                    if *exported { "export" } else { "" }.to_string(),
                     name.s_expr(src),
                     params.s_expr(src),
-                    if let Some(ty) = return_ty {
-                        ty.s_expr(src)
-                    } else {
-                        "void".into()
-                    },
+                    if let Some(ty) = return_ty { ty.s_expr(src) } else { "void".into() },
                     body.s_expr(src)
                 )
             }
@@ -263,12 +261,12 @@ macro_rules! test_main {
 fn test_hello_world() {
     test_parser! {
         r#"
-            fn main() int {
+            export fn main() int {
                 print("Hello world!")
             }
         "#,
         (module
-            (fn main (ret int)
+            (export fn main (ret int)
                 (
                     (call print "Hello world!")
                 )

@@ -264,3 +264,10 @@ fn args() {
 fn control_flow() {
     test_lexer(r#"if else while"#, vec![If, Else, While], true);
 }
+
+#[test]
+fn functions() {
+    test_lexer(r#"
+        export fn main() {}
+    "#, vec![Eol, Export, Fn, Identifier, LParen, RParen, LBrace, RBrace, Eol], true);
+}

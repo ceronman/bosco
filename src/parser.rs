@@ -52,12 +52,13 @@ impl<'src> Parser<'src> {
 
     fn item(&mut self) -> Result<Item> {
         match self.token.kind {
-            TokenKind::Fn => self.function(),
+            TokenKind::Fn | TokenKind::Export => self.function(),
             other => self.error(format!("Expected declaration, got {other:?}")),
         }
     }
 
     fn function(&mut self) -> Result<Item> {
+        let exported = self.eat(TokenKind::Export);
         let fn_keyword = self.expect(TokenKind::Fn)?;
         let name = self.expect(TokenKind::Identifier)?;
         self.expect(TokenKind::LParen)?;
@@ -85,6 +86,7 @@ impl<'src> Parser<'src> {
         Ok(Item {
             node: self.node(fn_keyword.span, body.node.span),
             kind: ItemKind::Function(Function {
+                exported,
                 name,
                 return_ty,
                 params,

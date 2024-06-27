@@ -22,6 +22,7 @@ pub struct Item {
 
 #[derive(Debug)]
 pub struct Function {
+    pub exported: bool,
     pub name: Token,
     pub return_ty: Option<Token>,
     pub params: Vec<Param>,

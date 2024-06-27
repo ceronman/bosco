@@ -45,6 +45,7 @@ pub enum TokenKind {
     Else,
     While,
     Fn,
+    Export,
 
     LineComment,
     BlockComment,
@@ -237,6 +238,7 @@ impl<'src> Lexer<'src> {
             "else" => TokenKind::Else,
             "while" => TokenKind::While,
             "fn" => TokenKind::Fn,
+            "export" => TokenKind::Export,
             "or" => TokenKind::Or,
             "and" => TokenKind::And,
             "not" => TokenKind::Not,
