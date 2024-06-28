@@ -1,10 +1,12 @@
 use crate::ast::{
     Expr, ExprKind, Function, Item, ItemKind, LiteralKind, Module, Param, Stmt, StmtKind,
 };
-use crate::lexer::Token;
-use crate::parser::parse;
+use crate::lexer::{Span, Token};
+use crate::parser::{parse, ParseError};
 use std::fmt::{Debug, Formatter};
 use std::str::Chars;
+use ariadne::{Label, Report, ReportKind, Source};
+use crate::compiler::CompileError;
 
 trait SExpr {
     fn s_expr(&self, src: &str) -> String;
@@ -61,9 +63,7 @@ impl SExpr for Stmt {
             StmtKind::Block { statements } => {
                 format!("({})", statements.s_expr(src))
             }
-            StmtKind::Call { callee, args } => {
-                format!("(call {} {})", callee.s_expr(src), args.s_expr(src))
-            }
+            StmtKind::ExprStmt(expr) => expr.s_expr(src),
             StmtKind::Declaration { name, ty, value } => format!(
                 "(let {} {} {})",
                 name.s_expr(src),
@@ -120,6 +120,10 @@ impl SExpr for Expr {
                 format!("(and {} {})", left.s_expr(src), right.s_expr(src))
             }
             ExprKind::Not { right } => format!("(not {})", right.s_expr(src)),
+
+            ExprKind::Call { callee, args } => {
+                format!("(call {} {})", callee.s_expr(src), args.s_expr(src))
+            }
         }
     }
 }
@@ -163,8 +167,26 @@ impl<T: SExpr> SExpr for Option<Box<T>> {
 }
 
 fn s_expr(src: &str) -> String {
-    let program = parse(src).unwrap();
-    program.s_expr(src)
+    match parse(src) {
+        Ok(module) => {
+            module.s_expr(src)
+        }
+        Err(dynamic_error) => {
+            let mut nice_error = Vec::new();
+            if let Some(e) = dynamic_error.downcast_ref::<ParseError>() {
+                let title = "Parse Error";
+                let message = e.msg.clone();
+                let span = e.span;
+                Report::build(ReportKind::Error, (), span.0)
+                    .with_message(title)
+                    .with_label(Label::new(span.0..span.1).with_message(message))
+                    .finish()
+                    .write(Source::from(src), &mut nice_error)
+                    .unwrap();
+            }
+            panic!("{}\n{dynamic_error:?}", String::from_utf8(nice_error).unwrap());
+        }
+    }
 }
 
 #[derive(Eq, PartialEq)]
@@ -286,10 +308,40 @@ fn test_function() {
 }
 
 #[test]
-fn test_simple_call() {
+fn test_call_statement() {
     test_main! {
         "print(\"hello\")",
         (call print "hello")
+    }
+}
+
+#[test]
+fn test_call_expression() {
+    test_main! {
+        r#"
+            let x int = calculate(1, 2)
+        "#,
+        (let x int (call calculate 1 2))
+    }
+}
+
+#[test]
+fn test_call_expression_precedence() {
+    test_main! {
+        r#"
+            a = 5 * calculate(1 + 2, 2 * 4)
+        "#,
+        (= a (* 5 (call calculate (+ 1 2) (* 2 4))))
+    }
+}
+
+#[test]
+fn test_call_expression_statement() {
+    test_main! {
+        r#"
+            calculate(1 + 2, 2 * 4)
+        "#,
+        (call calculate (+ 1 2) (* 2 4))
     }
 }
 
@@ -320,22 +372,10 @@ fn test_simple_call_with_ws() {
 }
 
 #[test]
-fn test_let_declaration() {
+fn test_variable_declaration() {
     test_main! {
         "let a int = 1",
         (let a int 1)
-    }
-}
-
-#[test]
-fn test_call_expression() {
-    test_main! {
-        r#"
-            let a int = 1
-            print(a)
-        "#,
-        (let a int 1)
-        (call print a)
     }
 }
 

@@ -16,42 +16,45 @@ impl<'src> Compiler<'src> {
                     self.type_check_stmt(stmt)?
                 }
             }
-            StmtKind::Call { callee, args } => {
-                let callee_name = callee.span.as_str(self.source);
-                if args.len() != 1 {
-                    return compile_error(
-                        format!("The '{callee_name}' function requires a single argument"),
-                        stmt.node.span,
-                    );
-                }
-                let arg_ty = self.type_check_expr(&args[0])?;
-                match callee_name {
-                    "print" => {} // TODO: Strings
-                    "print_int" => {
-                        if arg_ty != Ty::Int {
-                            return compile_error(
-                                "Function 'print_int' requires an int as argument",
-                                stmt.node.span,
-                            );
-                        }
-                    }
-                    "print_float" => {
-                        if arg_ty != Ty::Float {
-                            return compile_error(
-                                "Function 'print_float' requires an float as argument",
-                                stmt.node.span,
-                            );
-                        }
-                    }
-
-                    _ => {
-                        return compile_error(
-                            format!("Unknown function '{callee_name}'"),
-                            stmt.node.span,
-                        )
-                    } // TODO: duplicated error in compilation
-                }
+            StmtKind::ExprStmt(expr) => {
+                self.type_check_expr(expr)?;
             }
+            // StmtKind::Call { callee, args } => {
+            //     let callee_name = callee.span.as_str(self.source);
+            //     if args.len() != 1 {
+            //         return compile_error(
+            //             format!("The '{callee_name}' function requires a single argument"),
+            //             stmt.node.span,
+            //         );
+            //     }
+            //     let arg_ty = self.type_check_expr(&args[0])?;
+            //     match callee_name {
+            //         "print" => {} // TODO: Strings
+            //         "print_int" => {
+            //             if arg_ty != Ty::Int {
+            //                 return compile_error(
+            //                     "Function 'print_int' requires an int as argument",
+            //                     stmt.node.span,
+            //                 );
+            //             }
+            //         }
+            //         "print_float" => {
+            //             if arg_ty != Ty::Float {
+            //                 return compile_error(
+            //                     "Function 'print_float' requires an float as argument",
+            //                     stmt.node.span,
+            //                 );
+            //             }
+            //         }
+            // 
+            //         _ => {
+            //             return compile_error(
+            //                 format!("Unknown function '{callee_name}'"),
+            //                 stmt.node.span,
+            //             )
+            //         } // TODO: duplicated error in compilation
+            //     }
+            // }
             StmtKind::Declaration { name, value, .. } => {
                 let var_ty = self.symbol_table.lookup_var(name)?.ty;
                 if let Some(value) = value {
@@ -170,6 +173,8 @@ impl<'src> Compiler<'src> {
                 }
                 Ty::Bool
             }
+
+            _ => todo!()
         };
         self.expression_types.insert(expr.node.id, ty);
         Ok(ty)

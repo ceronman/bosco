@@ -96,11 +96,11 @@ impl<'src> SymbolTable<'src> {
                 }
                 self.end_scope();
             }
-            StmtKind::Call { callee: _, args } => {
-                for arg in args {
-                    self.resolve_expression(arg)?;
-                }
+
+            StmtKind::ExprStmt(expr) => {
+                self.resolve_expression(expr)?;
             }
+
             StmtKind::Declaration { name, ty, value } => {
                 self.declare(name, ty)?;
                 if let Some(value) = value {
@@ -146,6 +146,12 @@ impl<'src> SymbolTable<'src> {
                 self.resolve_expression(right)?;
             }
             ExprKind::Not { right } => self.resolve_expression(right)?,
+
+            ExprKind::Call { callee, args } => {
+                for arg in args {
+                    self.resolve_expression(arg)?;
+                }
+            }
         }
         Ok(())
     }

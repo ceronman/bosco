@@ -279,8 +279,9 @@ fn test_functions() {
         r#"
             export fn main() {
                 print("hello main!")
+                print_int(foo(4, 5))
             }
-            
+
             fn foo(a int, b int) int {
                 let x int = a * b
                 return x + 1

@@ -8,6 +8,7 @@ use crate::ast::{
 use crate::lexer::{Lexer, Span, Token, TokenKind};
 use anyhow::Result;
 use thiserror::Error;
+use crate::ast::StmtKind::ExprStmt;
 
 #[derive(Error, Debug)]
 #[error("Parse Error: {msg} at {span:?}")]
@@ -113,12 +114,8 @@ impl<'src> Parser<'src> {
             TokenKind::If => self.if_statement(),
             TokenKind::While => self.while_statement(),
             TokenKind::Return => self.return_statement(),
-            TokenKind::Identifier => match self.peek().kind {
-                TokenKind::LParen => self.call(),
-                TokenKind::Equal => self.assignment(),
-                kind => self.error(format!("Unexpected token when parsing statement {kind:?}")),
-            },
-            other_kind => self.error(format!("Expected statement, got {other_kind:?}")),
+            TokenKind::Identifier if self.peek().kind == TokenKind::Equal => self.assignment(),
+            _ => self.expr_stmt()
         }
     }
 
@@ -153,31 +150,59 @@ impl<'src> Parser<'src> {
                 break;
             }
             self.advance();
-            let right = self.expression_precedence(precedence + 1)?;
-
             // TODO: Generalize?
             left = match operator.kind {
-                TokenKind::Or => Expr {
-                    node: self.node(left.node.span, right.node.span),
-                    kind: ExprKind::Or {
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    },
+                TokenKind::Or => {
+                    let right = self.expression_precedence(precedence + 1)?;
+                    Expr {
+                        node: self.node(left.node.span, right.node.span),
+                        kind: ExprKind::Or {
+                            left: Box::new(left),
+                            right: Box::new(right),
+                        },
+                    }
                 },
-                TokenKind::And => Expr {
-                    node: self.node(left.node.span, right.node.span),
-                    kind: ExprKind::And {
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    },
+                TokenKind::And => {
+                    let right = self.expression_precedence(precedence + 1)?;
+                    Expr {
+                        node: self.node(left.node.span, right.node.span),
+                        kind: ExprKind::And {
+                            left: Box::new(left),
+                            right: Box::new(right),
+                        },
+                    }
                 },
-                _ => Expr {
-                    node: self.node(left.node.span, right.node.span),
-                    kind: ExprKind::Binary {
-                        left: Box::new(left),
-                        right: Box::new(right),
-                        operator,
-                    },
+                TokenKind::LParen => {
+                    let mut args = Vec::new();
+                    if self.token.kind != TokenKind::RParen {
+                        loop {
+                            self.maybe_eol();
+                            args.push(self.expression()?);
+
+                            if !self.eat(TokenKind::Comma) {
+                                break;
+                            }
+                        }
+                    }
+                    let rparen = self.expect(TokenKind::RParen)?;
+                    Expr {
+                        node: self.node(left.node.span, rparen.span),
+                        kind: ExprKind::Call {
+                            callee: Box::new(left),
+                            args,
+                        }
+                    }
+                }
+                _ => {
+                    let right = self.expression_precedence(precedence + 1)?;
+                    Expr {
+                        node: self.node(left.node.span, right.node.span),
+                        kind: ExprKind::Binary {
+                            left: Box::new(left),
+                            right: Box::new(right),
+                            operator,
+                        },
+                    }
                 },
             };
         }
@@ -193,6 +218,7 @@ impl<'src> Parser<'src> {
             Greater | GreaterEqual | Less | LessEqual => Some(4),
             Plus | Minus => Some(5),
             Star | Slash | Percent => Some(6),
+            LParen => Some(7),
             _ => None,
         }
     }
@@ -256,17 +282,6 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn call(&mut self) -> Result<Stmt> {
-        let callee = self.expect(TokenKind::Identifier)?;
-        self.expect(TokenKind::LParen)?;
-        let args = self.arguments()?;
-        let rparen = self.expect(TokenKind::RParen)?;
-        Ok(Stmt {
-            node: self.node(callee.span, rparen.span),
-            kind: StmtKind::Call { callee, args },
-        })
-    }
-
     fn arguments(&mut self) -> Result<Vec<Expr>> {
         if self.token.kind == TokenKind::RParen {
             Ok(vec![])
@@ -282,6 +297,14 @@ impl<'src> Parser<'src> {
         Ok(Stmt {
             node: self.node(name.span, value.node.span),
             kind: StmtKind::Assignment { name, value },
+        })
+    }
+    
+    fn expr_stmt(&mut self) -> Result<Stmt> {
+        let expr = self.expression()?;
+        Ok(Stmt{
+            node: self.node(expr.node.span, expr.node.span),
+            kind: ExprStmt(expr)
         })
     }
 

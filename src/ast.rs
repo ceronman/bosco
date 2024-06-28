@@ -49,12 +49,9 @@ pub struct Stmt {
 
 #[derive(Debug)]
 pub enum StmtKind {
+    ExprStmt(Expr),
     Block {
         statements: Vec<Stmt>,
-    },
-    Call {
-        callee: Token,
-        args: Vec<Expr>,
     },
     Declaration {
         name: Token,
@@ -107,6 +104,10 @@ pub enum ExprKind {
     Not {
         right: Box<Expr>,
     },
+    Call {
+        callee: Box<Expr>,
+        args: Vec<Expr>
+    }
 }
 
 #[derive(Debug)]
