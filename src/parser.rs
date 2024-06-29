@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod test;
 
+use crate::ast::StmtKind::ExprStmt;
 use crate::ast::{
     Expr, ExprKind, Function, Item, ItemKind, LiteralKind, Module, Node, NodeId, Param, Stmt,
     StmtKind,
@@ -8,7 +9,6 @@ use crate::ast::{
 use crate::lexer::{Lexer, Span, Token, TokenKind};
 use anyhow::Result;
 use thiserror::Error;
-use crate::ast::StmtKind::ExprStmt;
 
 #[derive(Error, Debug)]
 #[error("Parse Error: {msg} at {span:?}")]
@@ -115,7 +115,7 @@ impl<'src> Parser<'src> {
             TokenKind::While => self.while_statement(),
             TokenKind::Return => self.return_statement(),
             TokenKind::Identifier if self.peek().kind == TokenKind::Equal => self.assignment(),
-            _ => self.expr_stmt()
+            _ => self.expr_stmt(),
         }
     }
 
@@ -161,7 +161,7 @@ impl<'src> Parser<'src> {
                             right: Box::new(right),
                         },
                     }
-                },
+                }
                 TokenKind::And => {
                     let right = self.expression_precedence(precedence + 1)?;
                     Expr {
@@ -171,7 +171,7 @@ impl<'src> Parser<'src> {
                             right: Box::new(right),
                         },
                     }
-                },
+                }
                 TokenKind::LParen => {
                     let mut args = Vec::new();
                     if self.token.kind != TokenKind::RParen {
@@ -190,7 +190,7 @@ impl<'src> Parser<'src> {
                         kind: ExprKind::Call {
                             callee: Box::new(left),
                             args,
-                        }
+                        },
                     }
                 }
                 _ => {
@@ -203,7 +203,7 @@ impl<'src> Parser<'src> {
                             operator,
                         },
                     }
-                },
+                }
             };
         }
         Ok(left)
@@ -282,14 +282,6 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn arguments(&mut self) -> Result<Vec<Expr>> {
-        if self.token.kind == TokenKind::RParen {
-            Ok(vec![])
-        } else {
-            Ok(vec![self.expression()?])
-        }
-    }
-
     fn assignment(&mut self) -> Result<Stmt> {
         let name = self.expect(TokenKind::Identifier)?;
         self.expect(TokenKind::Equal)?;
@@ -299,12 +291,12 @@ impl<'src> Parser<'src> {
             kind: StmtKind::Assignment { name, value },
         })
     }
-    
+
     fn expr_stmt(&mut self) -> Result<Stmt> {
         let expr = self.expression()?;
-        Ok(Stmt{
+        Ok(Stmt {
             node: self.node(expr.node.span, expr.node.span),
-            kind: ExprStmt(expr)
+            kind: ExprStmt(expr),
         })
     }
 

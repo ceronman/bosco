@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 
-use crate::ast::{Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind};
-use crate::compiler::resolution::SymbolTable;
-use crate::lexer::{Span, Token, TokenKind};
-use crate::parser::parse;
 use anyhow::Result;
 use thiserror::Error;
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
     FunctionSection, ImportSection, Instruction, MemoryType, TypeSection, ValType,
 };
+
+use crate::ast::{Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind};
+use crate::compiler::resolution::SymbolTable;
+use crate::lexer::{Span, Token, TokenKind};
+use crate::parser::parse;
 
 mod resolution;
 #[cfg(test)]
@@ -51,20 +52,25 @@ impl Ty {
         }
     }
 
+    fn from_wasm(wasm_ty: &ValType) -> Ty {
+        match wasm_ty {
+            ValType::I32 => Ty::Int,
+            ValType::I64 => todo!(),
+            ValType::F32 => todo!(),
+            ValType::F64 => Ty::Float,
+            ValType::V128 => todo!(),
+            ValType::Ref(_) => todo!(),
+        }
+    }
+
     fn as_wasm(&self) -> ValType {
         match self {
-            Ty::Void => panic!("Should not happen"), // TODO: Remove this possibility
+            Ty::Void => todo!(),
             Ty::Int => ValType::I32,
-            Ty::Float => ValType::F32,
+            Ty::Float => ValType::F64,
             Ty::Bool => ValType::I32,
         }
     }
-}
-
-#[derive(Copy, Clone, Debug)]
-struct LocalVar {
-    index: u32,
-    ty: Ty,
 }
 
 struct Counter(u32);
@@ -75,14 +81,16 @@ impl Counter {
         self.0 += 1;
         current
     }
+
+    fn reset(&mut self) {
+        self.0 = 0;
+    }
 }
 
 struct Compiler<'src> {
     source: &'src str,
     strings: HashMap<Token, WasmStr>,
     symbol_table: SymbolTable<'src>,
-    fn_indices: HashMap<&'src str, u32>,
-    fn_counter: Counter,
     expression_types: HashMap<NodeId, Ty>,
     types: TypeSection,
     functions: FunctionSection,
@@ -101,8 +109,6 @@ impl<'src> Compiler<'src> {
             source,
             strings: Default::default(),
             symbol_table: SymbolTable::new(source),
-            fn_indices: Default::default(),
-            fn_counter: Counter(0),
             expression_types: Default::default(),
             types: Default::default(),
             functions: Default::default(),
@@ -130,33 +136,23 @@ impl<'src> Compiler<'src> {
         self.types.function(params, returns.iter().copied());
         self.functions.function(type_index);
 
-        // Resolve
-        self.symbol_table = SymbolTable::new(self.source);
-        self.symbol_table.resolve_function(function)?;
+        // Type check
+        self.type_check_function(function)?; // TODO: Move outside
 
-        self.type_check_function(function)?;
+        let name = function.name.span.as_str(self.source);
+        let Some(signature) = self.symbol_table.lookup_function(name) else {
+            return compile_error("Unresolved function", function.name.span);
+        };
 
-        // Calculate locals
-        let mut local_indices = self.symbol_table.locals().collect::<Vec<_>>();
-        local_indices.sort_by_key(|l| l.index);
-        let locals = local_indices.iter().map(|l| match l.ty {
-            Ty::Int | Ty::Bool => (1, ValType::I32),
-            Ty::Float => (1, ValType::F64),
-            _ => panic!("This should not happen"), // TODO: Resolver should make sure that there are no void
-        });
+        let locals = signature.local_vars.iter().map(|ty| (1, ty.as_wasm()));
         let mut wasm_function = wasm_encoder::Function::new(locals);
         self.statement(&mut wasm_function, &function.body)?;
         wasm_function.instruction(&Instruction::End);
         self.codes.function(&wasm_function);
 
-        // Register
-        let fn_index = self.fn_counter.next();
-        let name = function.name.span.as_str(self.source);
-        self.fn_indices.insert(name, fn_index);
-
         // Export
         if function.exported {
-            self.exports.export(name, ExportKind::Func, fn_index);
+            self.exports.export(name, ExportKind::Func, signature.index);
         }
         Ok(())
     }
@@ -181,9 +177,9 @@ impl<'src> Compiler<'src> {
             }
             StmtKind::ExprStmt(expr) => {
                 self.expression(func, expr)?;
-                func.instruction(&Instruction::Drop);
+                // func.instruction(&Instruction::Drop);
             }
-            
+
             // StmtKind::Call { callee, args, .. } => {
             //     let callee_name = callee.span.as_str(self.source);
             //     let Some(&callee) = self.fn_indices.get(callee_name) else {
@@ -224,7 +220,6 @@ impl<'src> Compiler<'src> {
             //         }
             //     }
             // }
-
             StmtKind::Declaration { name, value, .. } => {
                 if let Some(value) = value {
                     let local_var = self.symbol_table.lookup_var(name)?;
@@ -386,7 +381,43 @@ impl<'src> Compiler<'src> {
                 func.instruction(&Instruction::LocalGet(local_var.index));
             }
 
-            _ => todo!()
+            ExprKind::Call { callee, args } => {
+                let name = match callee.kind {
+                    ExprKind::Variable { name } => name.span.as_str(self.source),
+                    _ => {
+                        return compile_error(
+                            "First class functions are not supported",
+                            callee.node.span,
+                        )
+                    }
+                };
+
+                let Some(signature) = self.symbol_table.lookup_function(name) else {
+                    return compile_error("Unresolved function", expr.node.span);
+                };
+
+                // TODO: Hack!
+                if name == "print" {
+                    if let ExprKind::Literal(LiteralKind::String { token, .. }) = args[0].kind {
+                        self.expression(func, &args[0])?; // Needed to add the string value to data
+                        let Some(was_str) = self.strings.get(&token) else {
+                            return compile_error("String constant not found", token.span);
+                        };
+                        func.instruction(&Instruction::I32Const(was_str.offset as i32));
+                        func.instruction(&Instruction::I32Const(was_str.len as i32));
+                        func.instruction(&Instruction::Call(signature.index));
+                        return Ok(());
+                    } else {
+                        return compile_error("Incorrect arguments for 'print'!", expr.node.span);
+                    }
+                }
+
+                for arg in args {
+                    self.expression(func, arg)?;
+                }
+
+                func.instruction(&Instruction::Call(signature.index));
+            }
         }
         Ok(())
     }
@@ -409,7 +440,15 @@ impl<'src> Compiler<'src> {
             .function(params.iter().copied(), results.iter().copied());
         self.imports
             .import(module, name, EntityType::Function(type_idx));
-        self.fn_indices.insert(name, self.fn_counter.next());
+        self.symbol_table.import_function(
+            name,
+            params.iter().map(Ty::from_wasm).collect(),
+            match results.len() {
+                0 => Ty::Void,
+                1 => Ty::from_wasm(&results[0]),
+                _ => todo!(),
+            },
+        );
     }
 
     fn import_memory(&mut self) {
@@ -440,6 +479,7 @@ impl<'src> Compiler<'src> {
     fn compile(&mut self, module: &Module) -> Result<Vec<u8>> {
         self.import_functions();
         self.import_memory();
+        self.symbol_table.resolve(module)?;
         self.module(module)?;
         self.encode_wasm()
     }

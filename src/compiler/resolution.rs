@@ -2,14 +2,33 @@ use std::collections::{HashMap, VecDeque};
 
 use anyhow::Result;
 
-use crate::ast::{Expr, ExprKind, Function, Param, Stmt, StmtKind};
-use crate::compiler::{compile_error, LocalVar, Ty};
+use crate::ast::{Expr, ExprKind, Function, Item, ItemKind, Module, Param, Stmt, StmtKind};
+use crate::compiler::{compile_error, Counter, Ty};
 use crate::lexer::Token;
+
+#[derive(Copy, Clone, Debug)] // TODO: Should this be copy?
+pub struct LocalVar {
+    pub index: u32,
+    pub ty: Ty,
+}
+
+// TODO: Maybe store Function node instead using Rc<Function> ?
+#[derive(Debug, Clone)]
+pub struct FnSignature {
+    pub params: Vec<Ty>,
+    pub return_ty: Ty,
+    pub index: u32,
+    pub local_vars: Vec<Ty>, // TODO: Duplicate in SymbolTable
+}
 
 pub(super) struct SymbolTable<'src> {
     source: &'src str,
     environments: VecDeque<HashMap<String, LocalVar>>, // TODO: Use interned strings instead
-    locals: HashMap<Token, LocalVar>,
+    local_counter: Counter,
+    locals: HashMap<Token, LocalVar>, // TODO: Maybe move ty in local var to the type checker?
+    functions: HashMap<String, FnSignature>, // TODO: Figure out a better thing than String here.
+    function_counter: Counter,
+    function_locals: Vec<LocalVar>,
 }
 
 impl<'src> SymbolTable<'src> {
@@ -17,12 +36,15 @@ impl<'src> SymbolTable<'src> {
         SymbolTable {
             source,
             environments: Default::default(),
+            local_counter: Counter(0),
             locals: Default::default(),
+            functions: Default::default(),
+            function_counter: Counter(0),
+            function_locals: vec![],
         }
     }
 
-    fn declare(&mut self, name_token: &Token, ty_token: &Token) -> Result<u32> {
-        let index: u32 = self.locals.len().try_into()?;
+    fn declare(&mut self, name_token: &Token, ty_token: &Token) -> Result<()> {
         let name = name_token.span.as_str(self.source);
         let Some(env) = self.environments.front_mut() else {
             return compile_error(
@@ -38,19 +60,20 @@ impl<'src> SymbolTable<'src> {
             );
         }
         let local_var = LocalVar {
-            index,
+            index: self.local_counter.next(),
             ty: Ty::from_lexeme(ty_token, self.source)?,
         };
         env.insert(name.into(), local_var);
         self.locals.insert(*name_token, local_var);
-        Ok(index)
+        self.function_locals.push(local_var);
+        Ok(())
     }
 
     fn resolve_var(&mut self, token: &Token) -> Result<()> {
         let name = token.span.as_str(self.source);
         for env in &self.environments {
-            if let Some(&index) = env.get(name) {
-                self.locals.insert(*token, index);
+            if let Some(&local_var) = env.get(name) {
+                self.locals.insert(*token, local_var);
                 return Ok(());
             }
         }
@@ -65,6 +88,10 @@ impl<'src> SymbolTable<'src> {
         Ok(local)
     }
 
+    pub(super) fn lookup_function(&self, name: &str) -> Option<FnSignature> {
+        self.functions.get(name).map(|s| (*s).clone()) // TODO: Clone?
+    }
+
     fn begin_scope(&mut self) {
         self.environments.push_front(Default::default())
     }
@@ -73,17 +100,70 @@ impl<'src> SymbolTable<'src> {
         self.environments.pop_front();
     }
 
-    pub(super) fn locals(&self) -> impl Iterator<Item = LocalVar> + '_ {
-        self.locals.values().copied()
+    pub(super) fn resolve(&mut self, module: &Module) -> Result<()> {
+        for item in &module.items {
+            self.resolve_item(item)?;
+        }
+        Ok(())
     }
 
-    pub(super) fn resolve_function(&mut self, function: &Function) -> Result<()> {
+    pub(super) fn resolve_item(&mut self, item: &Item) -> Result<()> {
+        match &item.kind {
+            ItemKind::Function(function) => {
+                self.resolve_function(function)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn import_function(
+        &mut self,
+        name: impl Into<String>,
+        params: Vec<Ty>,
+        return_ty: Ty,
+    ) {
+        // TODO: Check duplicate functions!
+        self.functions.insert(
+            name.into(),
+            FnSignature {
+                params,
+                return_ty,
+                index: self.function_counter.next(),
+                local_vars: vec![],
+            },
+        );
+    }
+
+    fn resolve_function(&mut self, function: &Function) -> Result<()> {
+        //TODO: Ugly
+        self.function_locals.clear();
+        self.local_counter.reset();
+
         self.begin_scope(); // TODO: Double because of blocks
         for Param { name, ty, .. } in &function.params {
             self.declare(name, ty)?;
         }
         self.resolve_stmt(&function.body)?;
         self.end_scope();
+
+        let name = function.name.span.as_str(self.source);
+        // FIXME: Unwraps!
+        let signature = FnSignature {
+            params: function
+                .params
+                .iter()
+                .map(|p| Ty::from_lexeme(&p.ty, self.source).unwrap())
+                .collect(),
+            return_ty: function
+                .return_ty
+                .map(|r| Ty::from_lexeme(&r, self.source).unwrap())
+                .unwrap_or(Ty::Void),
+            index: self.function_counter.next(),
+            local_vars: self.function_locals.iter().map(|l| l.ty).collect(),
+        };
+        // TODO: Check duplicate functions!
+        self.functions.insert(name.into(), signature);
+
         Ok(())
     }
 
@@ -147,7 +227,10 @@ impl<'src> SymbolTable<'src> {
             }
             ExprKind::Not { right } => self.resolve_expression(right)?,
 
-            ExprKind::Call { callee, args } => {
+            ExprKind::Call {
+                callee: _callee,
+                args,
+            } => {
                 for arg in args {
                     self.resolve_expression(arg)?;
                 }

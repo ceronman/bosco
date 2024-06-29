@@ -46,7 +46,7 @@ impl<'src> Compiler<'src> {
             //                 );
             //             }
             //         }
-            // 
+            //
             //         _ => {
             //             return compile_error(
             //                 format!("Unknown function '{callee_name}'"),
@@ -174,7 +174,50 @@ impl<'src> Compiler<'src> {
                 Ty::Bool
             }
 
-            _ => todo!()
+            ExprKind::Call { callee, args } => {
+                let signature = match callee.kind {
+                    ExprKind::Variable { name } => {
+                        let name = name.span.as_str(self.source);
+
+                        // TODO: hack!
+                        if name == "print" {
+                            if args.len() != 1 {
+                                return compile_error(
+                                    "The 'print' function requires a single argument",
+                                    expr.node.span,
+                                );
+                            }
+                            return Ok(Ty::Void);
+                        }
+
+                        // TODO: This dance is duplicated
+                        let Some(s) = self.symbol_table.lookup_function(name) else {
+                            return compile_error("Unresolved function", callee.node.span);
+                        };
+                        s
+                    }
+                    _ => {
+                        return compile_error(
+                            "First class functions not supported",
+                            callee.node.span,
+                        )
+                    }
+                };
+                if args.len() != signature.params.len() {
+                    return compile_error(
+                        "Function called with incorrect number of arguments",
+                        expr.node.span,
+                    );
+                }
+                for (i, arg) in args.iter().enumerate() {
+                    let arg_ty = self.type_check_expr(arg)?;
+                    let param_ty = signature.params[i];
+                    if arg_ty != param_ty {
+                        return compile_error("Type Error: argument type mismatch", arg.node.span);
+                    }
+                }
+                signature.return_ty
+            }
         };
         self.expression_types.insert(expr.node.id, ty);
         Ok(ty)

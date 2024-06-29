@@ -9,6 +9,7 @@ use crate::parser::ParseError;
 
 fn run_in_wasmi(source: &str) -> anyhow::Result<String> {
     let wasm = compile(source)?;
+    // let wat = wasmprinter::print_bytes(&wasm)?; println!("\n{wat}\n");
     let engine = Engine::default();
     let module = Module::new(&engine, &wasm)?;
 
@@ -134,6 +135,20 @@ fn test_declaration_assignment() {
             1
             64
             1.5
+        "#,
+    )
+}
+
+#[test]
+fn test_one() {
+    program_test(
+        r#"
+            export fn main() {
+                print("hello")
+            }
+        "#,
+        r#"
+            hello
         "#,
     )
 }
@@ -289,6 +304,7 @@ fn test_functions() {
         "#,
         r#"
             hello main!
+            21
         "#,
     )
 }
@@ -394,12 +410,12 @@ fn test_type_errors() {
 
     assert_error(
         "export fn main() { print_int(1.5) }",
-        "Compilation Error: Function 'print_int' requires an int as argument at Span(19, 33)",
+        "Compilation Error: Type Error: argument type mismatch at Span(29, 32)",
     );
 
     assert_error(
         "export fn main() { print_float(1) }",
-        "Compilation Error: Function 'print_float' requires an float as argument at Span(19, 33)",
+        "Compilation Error: Type Error: argument type mismatch at Span(31, 32)",
     );
 
     assert_error(

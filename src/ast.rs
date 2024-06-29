@@ -106,8 +106,8 @@ pub enum ExprKind {
     },
     Call {
         callee: Box<Expr>,
-        args: Vec<Expr>
-    }
+        args: Vec<Expr>,
+    },
 }
 
 #[derive(Debug)]

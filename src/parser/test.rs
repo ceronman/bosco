@@ -1,12 +1,13 @@
+use std::fmt::{Debug, Formatter};
+use std::str::Chars;
+
+use ariadne::{Label, Report, ReportKind, Source};
+
 use crate::ast::{
     Expr, ExprKind, Function, Item, ItemKind, LiteralKind, Module, Param, Stmt, StmtKind,
 };
-use crate::lexer::{Span, Token};
+use crate::lexer::Token;
 use crate::parser::{parse, ParseError};
-use std::fmt::{Debug, Formatter};
-use std::str::Chars;
-use ariadne::{Label, Report, ReportKind, Source};
-use crate::compiler::CompileError;
 
 trait SExpr {
     fn s_expr(&self, src: &str) -> String;
@@ -168,9 +169,7 @@ impl<T: SExpr> SExpr for Option<Box<T>> {
 
 fn s_expr(src: &str) -> String {
     match parse(src) {
-        Ok(module) => {
-            module.s_expr(src)
-        }
+        Ok(module) => module.s_expr(src),
         Err(dynamic_error) => {
             let mut nice_error = Vec::new();
             if let Some(e) = dynamic_error.downcast_ref::<ParseError>() {
@@ -184,7 +183,10 @@ fn s_expr(src: &str) -> String {
                     .write(Source::from(src), &mut nice_error)
                     .unwrap();
             }
-            panic!("{}\n{dynamic_error:?}", String::from_utf8(nice_error).unwrap());
+            panic!(
+                "{}\n{dynamic_error:?}",
+                String::from_utf8(nice_error).unwrap()
+            );
         }
     }
 }
