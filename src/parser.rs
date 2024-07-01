@@ -3,8 +3,8 @@ mod test;
 
 use crate::ast::StmtKind::ExprStmt;
 use crate::ast::{
-    Expr, ExprKind, Function, Item, ItemKind, LiteralKind, Module, Node, NodeId, Param, Stmt,
-    StmtKind,
+    Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module, Node, NodeId, Param,
+    Stmt, StmtKind,
 };
 use crate::lexer::{Lexer, Span, Token, TokenKind};
 use anyhow::Result;
@@ -61,7 +61,7 @@ impl<'src> Parser<'src> {
     fn function(&mut self) -> Result<Item> {
         let exported = self.eat(TokenKind::Export);
         let fn_keyword = self.expect(TokenKind::Fn)?;
-        let name = self.expect(TokenKind::Identifier)?;
+        let name = self.identifier()?;
         self.expect(TokenKind::LParen)?;
         let mut params = Vec::new();
         if self.token.kind != TokenKind::RParen {
@@ -96,11 +96,20 @@ impl<'src> Parser<'src> {
         })
     }
 
+    fn identifier(&mut self) -> Result<Identifier> {
+        let token = self.expect(TokenKind::Identifier)?;
+        let symbol = token.span.as_str(self.source).into();
+        Ok(Identifier {
+            node: self.node(token.span, token.span),
+            symbol,
+        })
+    }
+
     fn param(&mut self) -> Result<Param> {
-        let name = self.expect(TokenKind::Identifier)?;
+        let name = self.identifier()?;
         let ty = self.expect(TokenKind::Identifier)?;
         Ok(Param {
-            _node: self.node(name.span, ty.span),
+            _node: self.node(name.node.span, ty.span),
             name,
             ty,
         })
@@ -275,19 +284,19 @@ impl<'src> Parser<'src> {
     }
 
     fn variable(&mut self) -> Result<Expr> {
-        let name = self.expect(TokenKind::Identifier)?;
+        let name = self.identifier()?;
         Ok(Expr {
-            node: self.node(name.span, name.span),
-            kind: ExprKind::Variable { name },
+            node: name.node,
+            kind: ExprKind::Variable(name),
         })
     }
 
     fn assignment(&mut self) -> Result<Stmt> {
-        let name = self.expect(TokenKind::Identifier)?;
+        let name = self.identifier()?;
         self.expect(TokenKind::Equal)?;
         let value = self.expression()?;
         Ok(Stmt {
-            node: self.node(name.span, value.node.span),
+            node: self.node(name.node.span, value.node.span),
             kind: StmtKind::Assignment { name, value },
         })
     }
@@ -302,7 +311,7 @@ impl<'src> Parser<'src> {
 
     fn declaration(&mut self) -> Result<Stmt> {
         let let_kw = self.expect(TokenKind::Let)?;
-        let name = self.expect(TokenKind::Identifier)?;
+        let name = self.identifier()?;
         let ty = self.expect_msg(TokenKind::Identifier, |_token| {
             "Type is required in declarations".to_string()
         })?;

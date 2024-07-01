@@ -2,7 +2,10 @@ use std::collections::{HashMap, VecDeque};
 
 use anyhow::Result;
 
-use crate::ast::{Expr, ExprKind, Function, Item, ItemKind, Module, Param, Stmt, StmtKind};
+use crate::ast::{
+    Expr, ExprKind, Function, Identifier, Item, ItemKind, Module, NodeId, Param, Stmt, StmtKind,
+    Symbol,
+};
 use crate::compiler::{compile_error, Counter, Ty};
 use crate::lexer::Token;
 
@@ -23,10 +26,10 @@ pub struct FnSignature {
 
 pub(super) struct SymbolTable<'src> {
     source: &'src str,
-    environments: VecDeque<HashMap<String, LocalVar>>, // TODO: Use interned strings instead
+    environments: VecDeque<HashMap<Symbol, LocalVar>>, // TODO: Use interned strings instead
     local_counter: Counter,
-    locals: HashMap<Token, LocalVar>, // TODO: Maybe move ty in local var to the type checker?
-    functions: HashMap<String, FnSignature>, // TODO: Figure out a better thing than String here.
+    locals: HashMap<NodeId, LocalVar>, // TODO: Maybe move ty in local var to the type checker?
+    functions: HashMap<Symbol, FnSignature>, // TODO: Figure out a better thing than String here.
     function_counter: Counter,
     function_locals: Vec<LocalVar>,
 }
@@ -44,52 +47,61 @@ impl<'src> SymbolTable<'src> {
         }
     }
 
-    fn declare(&mut self, name_token: &Token, ty_token: &Token) -> Result<()> {
-        let name = name_token.span.as_str(self.source);
+    fn declare(&mut self, ident: &Identifier, ty_token: &Token) -> Result<()> {
         let Some(env) = self.environments.front_mut() else {
             return compile_error(
-                format!("Variable '{name}' was declared outside of any scope"),
-                name_token.span,
+                format!(
+                    "Variable '{}' was declared outside of any scope",
+                    ident.symbol
+                ),
+                ident.node.span,
             );
         };
 
-        if env.contains_key(name) {
+        if env.contains_key(&ident.symbol) {
             return compile_error(
-                format!("Variable '{name}' was already declared in this scope"),
-                name_token.span,
+                format!(
+                    "Variable '{}' was already declared in this scope",
+                    ident.symbol
+                ),
+                ident.node.span,
             );
         }
         let local_var = LocalVar {
             index: self.local_counter.next(),
             ty: Ty::from_lexeme(ty_token, self.source)?,
         };
-        env.insert(name.into(), local_var);
-        self.locals.insert(*name_token, local_var);
+        env.insert(ident.symbol.clone(), local_var);
+        self.locals.insert(ident.node.id, local_var);
         self.function_locals.push(local_var);
         Ok(())
     }
 
-    fn resolve_var(&mut self, token: &Token) -> Result<()> {
-        let name = token.span.as_str(self.source);
+    fn resolve_var(&mut self, ident: &Identifier) -> Result<()> {
         for env in &self.environments {
-            if let Some(&local_var) = env.get(name) {
-                self.locals.insert(*token, local_var);
+            if let Some(&local_var) = env.get(&ident.symbol) {
+                self.locals.insert(ident.node.id, local_var);
                 return Ok(());
             }
         }
-        compile_error(format!("Undeclared variable '{name}'"), token.span)
+        compile_error(
+            format!("Undeclared variable '{}'", ident.symbol),
+            ident.node.span,
+        )
     }
 
-    pub(super) fn lookup_var(&self, token: &Token) -> Result<LocalVar> {
-        let name = token.span.as_str(self.source);
-        let Some(&local) = self.locals.get(token) else {
-            return compile_error(format!("Undeclared variable '{name}'"), token.span);
+    pub(super) fn lookup_var(&self, ident: &Identifier) -> Result<LocalVar> {
+        let Some(&local) = self.locals.get(&ident.node.id) else {
+            return compile_error(
+                format!("Undeclared variable '{}'", ident.symbol),
+                ident.node.span,
+            );
         };
         Ok(local)
     }
 
-    pub(super) fn lookup_function(&self, name: &str) -> Option<FnSignature> {
-        self.functions.get(name).map(|s| (*s).clone()) // TODO: Clone?
+    pub(super) fn lookup_function(&self, name: &Identifier) -> Option<FnSignature> {
+        self.functions.get(&name.symbol).map(|s| (*s).clone()) // TODO: Clone?
     }
 
     fn begin_scope(&mut self) {
@@ -116,15 +128,10 @@ impl<'src> SymbolTable<'src> {
         Ok(())
     }
 
-    pub(super) fn import_function(
-        &mut self,
-        name: impl Into<String>,
-        params: Vec<Ty>,
-        return_ty: Ty,
-    ) {
+    pub(super) fn import_function(&mut self, name: Symbol, params: Vec<Ty>, return_ty: Ty) {
         // TODO: Check duplicate functions!
         self.functions.insert(
-            name.into(),
+            name,
             FnSignature {
                 params,
                 return_ty,
@@ -146,7 +153,7 @@ impl<'src> SymbolTable<'src> {
         self.resolve_stmt(&function.body)?;
         self.end_scope();
 
-        let name = function.name.span.as_str(self.source);
+        let name = function.name.symbol.clone();
         // FIXME: Unwraps!
         let signature = FnSignature {
             params: function
@@ -162,7 +169,7 @@ impl<'src> SymbolTable<'src> {
             local_vars: self.function_locals.iter().map(|l| l.ty).collect(),
         };
         // TODO: Check duplicate functions!
-        self.functions.insert(name.into(), signature);
+        self.functions.insert(name, signature);
 
         Ok(())
     }
@@ -218,7 +225,7 @@ impl<'src> SymbolTable<'src> {
     fn resolve_expression(&mut self, expr: &Expr) -> Result<()> {
         match &expr.kind {
             ExprKind::Literal(_) => {}
-            ExprKind::Variable { name } => self.resolve_var(name)?,
+            ExprKind::Variable(ident) => self.resolve_var(ident)?,
             ExprKind::Binary { left, right, .. }
             | ExprKind::Or { left, right, .. }
             | ExprKind::And { left, right, .. } => {

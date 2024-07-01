@@ -4,7 +4,8 @@ use std::str::Chars;
 use ariadne::{Label, Report, ReportKind, Source};
 
 use crate::ast::{
-    Expr, ExprKind, Function, Item, ItemKind, LiteralKind, Module, Param, Stmt, StmtKind,
+    Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module, Param, Stmt,
+    StmtKind,
 };
 use crate::lexer::Token;
 use crate::parser::{parse, ParseError};
@@ -58,6 +59,12 @@ impl SExpr for Param {
     }
 }
 
+impl SExpr for Identifier {
+    fn s_expr(&self, _src: &str) -> String {
+        self.symbol.as_str().to_owned()
+    }
+}
+
 impl SExpr for Stmt {
     fn s_expr(&self, src: &str) -> String {
         match &self.kind {
@@ -103,7 +110,7 @@ impl SExpr for Expr {
     fn s_expr(&self, src: &str) -> String {
         match &self.kind {
             ExprKind::Literal(literal) => literal.s_expr(src),
-            ExprKind::Variable { name } => format!("{}", name.s_expr(src)),
+            ExprKind::Variable(ident) => ident.s_expr(src),
             ExprKind::Binary {
                 left,
                 right,

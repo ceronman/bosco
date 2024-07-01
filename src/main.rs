@@ -4,7 +4,6 @@ mod ast;
 mod compiler;
 mod lexer;
 mod parser;
-mod interner;
 
 fn main() {
     let code = r#"

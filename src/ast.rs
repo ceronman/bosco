@@ -1,6 +1,28 @@
 use crate::lexer::{Span, Token};
+use std::fmt::{Display, Formatter};
 
 pub type NodeId = u32;
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct Symbol(String);
+
+impl Symbol {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Display for Symbol {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl From<&str> for Symbol {
+    fn from(value: &str) -> Self {
+        Symbol(value.to_owned())
+    }
+}
 
 #[derive(Copy, Clone, Debug)]
 pub struct Node {
@@ -23,7 +45,7 @@ pub struct Item {
 #[derive(Debug)]
 pub struct Function {
     pub exported: bool,
-    pub name: Token,
+    pub name: Identifier,
     pub return_ty: Option<Token>,
     pub params: Vec<Param>,
     pub body: Stmt,
@@ -37,7 +59,7 @@ pub enum ItemKind {
 #[derive(Debug)]
 pub struct Param {
     pub _node: Node,
-    pub name: Token,
+    pub name: Identifier,
     pub ty: Token,
 }
 
@@ -54,12 +76,12 @@ pub enum StmtKind {
         statements: Vec<Stmt>,
     },
     Declaration {
-        name: Token,
+        name: Identifier,
         ty: Token,
         value: Option<Expr>,
     },
     Assignment {
-        name: Token,
+        name: Identifier,
         value: Expr,
     },
     If {
@@ -85,9 +107,7 @@ pub struct Expr {
 #[derive(Debug)]
 pub enum ExprKind {
     Literal(LiteralKind),
-    Variable {
-        name: Token,
-    },
+    Variable(Identifier),
     Binary {
         left: Box<Expr>,
         right: Box<Expr>,
@@ -116,4 +136,10 @@ pub enum LiteralKind {
     Float(f64),
     Bool(bool),
     String { token: Token, value: String },
+}
+
+#[derive(Debug)]
+pub struct Identifier {
+    pub node: Node,
+    pub symbol: Symbol,
 }

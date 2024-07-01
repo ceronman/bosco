@@ -119,8 +119,8 @@ impl<'src> Compiler<'src> {
             ExprKind::Literal(LiteralKind::Float(_)) => Ty::Float,
             ExprKind::Literal(LiteralKind::String { .. }) => Ty::Int, // TODO: Fix me!
             ExprKind::Literal(LiteralKind::Bool(_)) => Ty::Bool,      // TODO: Fix me!
-            ExprKind::Variable { name } => {
-                let local_var = self.symbol_table.lookup_var(name)?;
+            ExprKind::Variable(ident) => {
+                let local_var = self.symbol_table.lookup_var(ident)?;
                 local_var.ty
             }
             ExprKind::Binary {
@@ -175,12 +175,10 @@ impl<'src> Compiler<'src> {
             }
 
             ExprKind::Call { callee, args } => {
-                let signature = match callee.kind {
-                    ExprKind::Variable { name } => {
-                        let name = name.span.as_str(self.source);
-
+                let signature = match &callee.kind {
+                    ExprKind::Variable(ident) => {
                         // TODO: hack!
-                        if name == "print" {
+                        if ident.symbol.as_str() == "print" {
                             if args.len() != 1 {
                                 return compile_error(
                                     "The 'print' function requires a single argument",
@@ -191,7 +189,7 @@ impl<'src> Compiler<'src> {
                         }
 
                         // TODO: This dance is duplicated
-                        let Some(s) = self.symbol_table.lookup_function(name) else {
+                        let Some(s) = self.symbol_table.lookup_function(ident) else {
                             return compile_error("Unresolved function", callee.node.span);
                         };
                         s

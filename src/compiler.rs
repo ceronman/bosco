@@ -7,7 +7,9 @@ use wasm_encoder::{
     FunctionSection, ImportSection, Instruction, MemoryType, TypeSection, ValType,
 };
 
-use crate::ast::{Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind};
+use crate::ast::{
+    Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind, Symbol,
+};
 use crate::compiler::resolution::SymbolTable;
 use crate::lexer::{Span, Token, TokenKind};
 use crate::parser::parse;
@@ -139,9 +141,11 @@ impl<'src> Compiler<'src> {
         // Type check
         self.type_check_function(function)?; // TODO: Move outside
 
-        let name = function.name.span.as_str(self.source);
-        let Some(signature) = self.symbol_table.lookup_function(name) else {
-            return compile_error("Unresolved function", function.name.span);
+        let Some(signature) = self.symbol_table.lookup_function(&function.name) else {
+            return compile_error(
+                format!("Unresolved function {}", function.name.symbol),
+                function.name.node.span,
+            );
         };
 
         let locals = signature.local_vars.iter().map(|ty| (1, ty.as_wasm()));
@@ -152,7 +156,11 @@ impl<'src> Compiler<'src> {
 
         // Export
         if function.exported {
-            self.exports.export(name, ExportKind::Func, signature.index);
+            self.exports.export(
+                function.name.symbol.as_str(),
+                ExportKind::Func,
+                signature.index,
+            );
         }
         Ok(())
     }
@@ -376,14 +384,14 @@ impl<'src> Compiler<'src> {
                 func.instruction(&Instruction::I32Const(1));
                 func.instruction(&Instruction::End);
             }
-            ExprKind::Variable { name } => {
-                let local_var = self.symbol_table.lookup_var(name)?;
+            ExprKind::Variable(ident) => {
+                let local_var = self.symbol_table.lookup_var(ident)?;
                 func.instruction(&Instruction::LocalGet(local_var.index));
             }
 
             ExprKind::Call { callee, args } => {
-                let name = match callee.kind {
-                    ExprKind::Variable { name } => name.span.as_str(self.source),
+                let name = match &callee.kind {
+                    ExprKind::Variable(ident) => ident,
                     _ => {
                         return compile_error(
                             "First class functions are not supported",
@@ -397,7 +405,7 @@ impl<'src> Compiler<'src> {
                 };
 
                 // TODO: Hack!
-                if name == "print" {
+                if name.symbol.as_str() == "print" {
                     if let ExprKind::Literal(LiteralKind::String { token, .. }) = args[0].kind {
                         self.expression(func, &args[0])?; // Needed to add the string value to data
                         let Some(was_str) = self.strings.get(&token) else {
@@ -441,7 +449,7 @@ impl<'src> Compiler<'src> {
         self.imports
             .import(module, name, EntityType::Function(type_idx));
         self.symbol_table.import_function(
-            name,
+            Symbol::from(name),
             params.iter().map(Ty::from_wasm).collect(),
             match results.len() {
                 0 => Ty::Void,
