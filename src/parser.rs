@@ -4,7 +4,7 @@ mod test;
 use crate::ast::StmtKind::ExprStmt;
 use crate::ast::{
     Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module, Node, NodeId, Param,
-    Stmt, StmtKind,
+    Stmt, StmtKind, Ty,
 };
 use crate::lexer::{Lexer, Span, Token, TokenKind};
 use anyhow::Result;
@@ -76,10 +76,7 @@ impl<'src> Parser<'src> {
         }
         self.expect(TokenKind::RParen)?;
         let return_ty = if self.token.kind == TokenKind::Identifier {
-            // TODO sounds like a helper is needed
-            let ty = self.token;
-            self.advance();
-            Some(ty)
+            Some(self.ty()?)
         } else {
             None
         };
@@ -105,14 +102,21 @@ impl<'src> Parser<'src> {
         })
     }
 
+    fn ty(&mut self) -> Result<Ty> {
+        let token = self.expect_msg(TokenKind::Identifier, |token| {
+            format!("Expected type, found {:?} instead", token.kind)
+        })?;
+        let symbol = token.span.as_str(self.source).into();
+        Ok(Identifier {
+            node: self.node(token.span, token.span),
+            symbol,
+        })
+    }
+
     fn param(&mut self) -> Result<Param> {
         let name = self.identifier()?;
-        let ty = self.expect(TokenKind::Identifier)?;
-        Ok(Param {
-            _node: self.node(name.node.span, ty.span),
-            name,
-            ty,
-        })
+        let ty = self.ty()?;
+        Ok(Param { name, ty })
     }
 
     fn statement(&mut self) -> Result<Stmt> {
@@ -312,18 +316,16 @@ impl<'src> Parser<'src> {
     fn declaration(&mut self) -> Result<Stmt> {
         let let_kw = self.expect(TokenKind::Let)?;
         let name = self.identifier()?;
-        let ty = self.expect_msg(TokenKind::Identifier, |_token| {
-            "Type is required in declarations".to_string()
-        })?;
-        let (value, end) = if self.eat(TokenKind::Equal) {
+        let ty = self.ty()?;
+        let (value, end_span) = if self.eat(TokenKind::Equal) {
             let initializer = self.expression()?;
             let span = initializer.node.span;
             (Some(initializer), span)
         } else {
-            (None, ty.span)
+            (None, ty.node.span)
         };
         Ok(Stmt {
-            node: self.node(let_kw.span, end),
+            node: self.node(let_kw.span, end_span),
             kind: StmtKind::Declaration { name, ty, value },
         })
     }

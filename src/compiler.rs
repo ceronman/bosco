@@ -1,18 +1,18 @@
 use std::collections::HashMap;
 
-use anyhow::Result;
-use thiserror::Error;
-use wasm_encoder::{
-    BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
-    FunctionSection, ImportSection, Instruction, MemoryType, TypeSection, ValType,
-};
-
+use crate::ast;
 use crate::ast::{
     Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind, Symbol,
 };
 use crate::compiler::resolution::SymbolTable;
 use crate::lexer::{Span, Token, TokenKind};
 use crate::parser::parse;
+use anyhow::Result;
+use thiserror::Error;
+use wasm_encoder::{
+    BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
+    FunctionSection, ImportSection, Instruction, MemoryType, TypeSection, ValType,
+};
 
 mod resolution;
 #[cfg(test)]
@@ -42,15 +42,14 @@ pub enum Ty {
 }
 
 impl Ty {
-    // TODO: This should probably be at the parser level
-    fn from_lexeme(token: &Token, source: &str) -> Result<Ty> {
-        let lexeme = token.span.as_str(source);
-        match lexeme {
+    fn from_ast(ast_ty: &ast::Ty) -> Result<Ty> {
+        let name = ast_ty.symbol.as_str();
+        match name {
             "void" => Ok(Ty::Void),
             "int" => Ok(Ty::Int),
             "float" => Ok(Ty::Float),
             "bool" => Ok(Ty::Bool),
-            _ => compile_error(format!("Unknown type {lexeme}"), token.span),
+            _ => compile_error(format!("Unknown type {name}"), ast_ty.node.span),
         }
     }
 
@@ -75,6 +74,7 @@ impl Ty {
     }
 }
 
+#[derive(Default)]
 struct Counter(u32);
 
 impl Counter {
@@ -89,10 +89,10 @@ impl Counter {
     }
 }
 
-struct Compiler<'src> {
-    source: &'src str,
+#[derive(Default)]
+struct Compiler {
     strings: HashMap<Token, WasmStr>,
-    symbol_table: SymbolTable<'src>,
+    symbol_table: SymbolTable,
     expression_types: HashMap<NodeId, Ty>,
     types: TypeSection,
     functions: FunctionSection,
@@ -103,34 +103,18 @@ struct Compiler<'src> {
     exports: ExportSection,
 }
 
-impl<'src> Compiler<'src> {
+impl Compiler {
     const MEM: u32 = 0;
-
-    fn new(source: &'src str) -> Self {
-        Compiler {
-            source,
-            strings: Default::default(),
-            symbol_table: SymbolTable::new(source),
-            expression_types: Default::default(),
-            types: Default::default(),
-            functions: Default::default(),
-            codes: Default::default(),
-            data: Default::default(),
-            data_offset: Default::default(),
-            imports: Default::default(),
-            exports: Default::default(),
-        }
-    }
 
     fn function(&mut self, function: &Function) -> Result<()> {
         // Declare type
         let mut params = Vec::new();
         for param in &function.params {
-            let ty = Ty::from_lexeme(&param.ty, self.source)?;
+            let ty = Ty::from_ast(&param.ty)?;
             params.push(ty.as_wasm())
         }
-        let returns: &[ValType] = if let Some(return_ty) = function.return_ty {
-            &[Ty::from_lexeme(&return_ty, self.source)?.as_wasm()]
+        let returns: &[ValType] = if let Some(return_ty) = &function.return_ty {
+            &[Ty::from_ast(return_ty)?.as_wasm()]
         } else {
             &[]
         };
@@ -503,6 +487,6 @@ fn compile_error<T>(msg: impl Into<String>, span: Span) -> Result<T> {
 
 pub fn compile(source: &str) -> Result<Vec<u8>> {
     let module = parse(source)?;
-    let mut compiler = Compiler::new(source);
+    let mut compiler = Compiler::default();
     compiler.compile(&module)
 }

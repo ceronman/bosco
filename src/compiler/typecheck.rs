@@ -3,7 +3,7 @@ use crate::compiler::{compile_error, Compiler, Ty};
 use crate::lexer::TokenKind;
 use anyhow::Result;
 
-impl<'src> Compiler<'src> {
+impl Compiler {
     pub(super) fn type_check_function(&mut self, function: &Function) -> Result<()> {
         self.type_check_stmt(&function.body)?;
         Ok(())

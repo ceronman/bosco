@@ -344,7 +344,7 @@ fn test_errors() {
     );
     assert_error(
         "export fn main() { let x = 1 }",
-        "Parse Error: Type is required in declarations at Span(25, 26)",
+        "Parse Error: Expected type, found Equal instead at Span(25, 26)",
     );
 }
 

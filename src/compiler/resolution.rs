@@ -7,7 +7,6 @@ use crate::ast::{
     Symbol,
 };
 use crate::compiler::{compile_error, Counter, Ty};
-use crate::lexer::Token;
 
 #[derive(Copy, Clone, Debug)] // TODO: Should this be copy?
 pub struct LocalVar {
@@ -24,8 +23,8 @@ pub struct FnSignature {
     pub local_vars: Vec<Ty>, // TODO: Duplicate in SymbolTable
 }
 
-pub(super) struct SymbolTable<'src> {
-    source: &'src str,
+#[derive(Default)]
+pub(super) struct SymbolTable {
     environments: VecDeque<HashMap<Symbol, LocalVar>>, // TODO: Use interned strings instead
     local_counter: Counter,
     locals: HashMap<NodeId, LocalVar>, // TODO: Maybe move ty in local var to the type checker?
@@ -34,20 +33,8 @@ pub(super) struct SymbolTable<'src> {
     function_locals: Vec<LocalVar>,
 }
 
-impl<'src> SymbolTable<'src> {
-    pub(super) fn new(source: &'src str) -> Self {
-        SymbolTable {
-            source,
-            environments: Default::default(),
-            local_counter: Counter(0),
-            locals: Default::default(),
-            functions: Default::default(),
-            function_counter: Counter(0),
-            function_locals: vec![],
-        }
-    }
-
-    fn declare(&mut self, ident: &Identifier, ty_token: &Token) -> Result<()> {
+impl SymbolTable {
+    fn declare(&mut self, ident: &Identifier, ty: Ty) -> Result<()> {
         let Some(env) = self.environments.front_mut() else {
             return compile_error(
                 format!(
@@ -69,7 +56,7 @@ impl<'src> SymbolTable<'src> {
         }
         let local_var = LocalVar {
             index: self.local_counter.next(),
-            ty: Ty::from_lexeme(ty_token, self.source)?,
+            ty,
         };
         env.insert(ident.symbol.clone(), local_var);
         self.locals.insert(ident.node.id, local_var);
@@ -148,7 +135,7 @@ impl<'src> SymbolTable<'src> {
 
         self.begin_scope(); // TODO: Double because of blocks
         for Param { name, ty, .. } in &function.params {
-            self.declare(name, ty)?;
+            self.declare(name, Ty::from_ast(ty)?)?;
         }
         self.resolve_stmt(&function.body)?;
         self.end_scope();
@@ -159,11 +146,12 @@ impl<'src> SymbolTable<'src> {
             params: function
                 .params
                 .iter()
-                .map(|p| Ty::from_lexeme(&p.ty, self.source).unwrap())
+                .map(|p| Ty::from_ast(&p.ty).unwrap())
                 .collect(),
             return_ty: function
                 .return_ty
-                .map(|r| Ty::from_lexeme(&r, self.source).unwrap())
+                .as_ref()
+                .map(|r| Ty::from_ast(r).unwrap())
                 .unwrap_or(Ty::Void),
             index: self.function_counter.next(),
             local_vars: self.function_locals.iter().map(|l| l.ty).collect(),
@@ -189,7 +177,7 @@ impl<'src> SymbolTable<'src> {
             }
 
             StmtKind::Declaration { name, ty, value } => {
-                self.declare(name, ty)?;
+                self.declare(name, Ty::from_ast(ty)?)?;
                 if let Some(value) = value {
                     self.resolve_expression(value)?;
                 }
