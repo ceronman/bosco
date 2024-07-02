@@ -7,27 +7,20 @@ use crate::ast::{
     BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module,
     Param, Stmt, StmtKind,
 };
-use crate::lexer::Token;
 use crate::parser::{parse, ParseError};
 
 trait SExpr {
-    fn s_expr(&self, src: &str) -> String;
+    fn s_expr(&self) -> String;
 }
 
 impl SExpr for Module {
-    fn s_expr(&self, src: &str) -> String {
-        format!("(module {})", self.items.s_expr(src))
-    }
-}
-
-impl SExpr for Token {
-    fn s_expr(&self, src: &str) -> String {
-        self.span.as_str(src).into()
+    fn s_expr(&self) -> String {
+        format!("(module {})", self.items.s_expr())
     }
 }
 
 impl SExpr for Item {
-    fn s_expr(&self, src: &str) -> String {
+    fn s_expr(&self) -> String {
         match &self.kind {
             ItemKind::Function(Function {
                 exported,
@@ -39,14 +32,14 @@ impl SExpr for Item {
                 format!(
                     "({} fn {} {} (ret {}) {})",
                     if *exported { "export" } else { "" }.to_string(),
-                    name.s_expr(src),
-                    params.s_expr(src),
+                    name.s_expr(),
+                    params.s_expr(),
                     if let Some(ty) = return_ty {
-                        ty.s_expr(src)
+                        ty.s_expr()
                     } else {
                         "void".into()
                     },
-                    body.s_expr(src)
+                    body.s_expr()
                 )
             }
         }
@@ -54,32 +47,32 @@ impl SExpr for Item {
 }
 
 impl SExpr for Param {
-    fn s_expr(&self, src: &str) -> String {
-        format!("(param {} {})", self.name.s_expr(src), self.ty.s_expr(src))
+    fn s_expr(&self) -> String {
+        format!("(param {} {})", self.name.s_expr(), self.ty.s_expr())
     }
 }
 
 impl SExpr for Identifier {
-    fn s_expr(&self, _src: &str) -> String {
+    fn s_expr(&self) -> String {
         self.symbol.as_str().to_owned()
     }
 }
 
 impl SExpr for Stmt {
-    fn s_expr(&self, src: &str) -> String {
+    fn s_expr(&self) -> String {
         match &self.kind {
             StmtKind::Block { statements } => {
-                format!("({})", statements.s_expr(src))
+                format!("({})", statements.s_expr())
             }
-            StmtKind::ExprStmt(expr) => expr.s_expr(src),
+            StmtKind::ExprStmt(expr) => expr.s_expr(),
             StmtKind::Declaration { name, ty, value } => format!(
                 "(let {} {} {})",
-                name.s_expr(src),
-                ty.s_expr(&src),
-                value.as_ref().map(|v| v.s_expr(&src)).unwrap_or("".into())
+                name.s_expr(),
+                ty.s_expr(),
+                value.as_ref().map(|v| v.s_expr()).unwrap_or("".into())
             ),
             StmtKind::Assignment { name, value } => {
-                format!("(= {} {})", name.s_expr(src), value.s_expr(src))
+                format!("(= {} {})", name.s_expr(), value.s_expr())
             }
 
             StmtKind::If {
@@ -89,55 +82,55 @@ impl SExpr for Stmt {
             } => {
                 format!(
                     "(if {} {} {})",
-                    condition.s_expr(src),
-                    then_block.s_expr(src),
-                    else_block.s_expr(src)
+                    condition.s_expr(),
+                    then_block.s_expr(),
+                    else_block.s_expr()
                 )
             }
 
             StmtKind::While { condition, body } => {
-                format!("(while {} ({}))", condition.s_expr(src), body.s_expr(src))
+                format!("(while {} ({}))", condition.s_expr(), body.s_expr())
             }
 
             StmtKind::Return { expr } => {
-                format!("(return {})", expr.s_expr(src))
+                format!("(return {})", expr.s_expr())
             }
         }
     }
 }
 
 impl SExpr for Expr {
-    fn s_expr(&self, src: &str) -> String {
+    fn s_expr(&self) -> String {
         match &self.kind {
-            ExprKind::Literal(literal) => literal.s_expr(src),
-            ExprKind::Variable(ident) => ident.s_expr(src),
+            ExprKind::Literal(literal) => literal.s_expr(),
+            ExprKind::Variable(ident) => ident.s_expr(),
             ExprKind::Binary {
                 left,
                 right,
                 operator,
             } => format!(
                 "({} {} {})",
-                operator.s_expr(src),
-                left.s_expr(src),
-                right.s_expr(src)
+                operator.s_expr(),
+                left.s_expr(),
+                right.s_expr()
             ),
             ExprKind::Or { left, right } => {
-                format!("(or {} {})", left.s_expr(src), right.s_expr(src))
+                format!("(or {} {})", left.s_expr(), right.s_expr())
             }
             ExprKind::And { left, right } => {
-                format!("(and {} {})", left.s_expr(src), right.s_expr(src))
+                format!("(and {} {})", left.s_expr(), right.s_expr())
             }
-            ExprKind::Not { right } => format!("(not {})", right.s_expr(src)),
+            ExprKind::Not { right } => format!("(not {})", right.s_expr()),
 
             ExprKind::Call { callee, args } => {
-                format!("(call {} {})", callee.s_expr(src), args.s_expr(src))
+                format!("(call {} {})", callee.s_expr(), args.s_expr())
             }
         }
     }
 }
 
 impl SExpr for BinOp {
-    fn s_expr(&self, src: &str) -> String {
+    fn s_expr(&self) -> String {
         match self.kind {
             BinOpKind::Add => "+",
             BinOpKind::Sub => "-",
@@ -158,7 +151,7 @@ impl SExpr for BinOp {
 }
 
 impl SExpr for LiteralKind {
-    fn s_expr(&self, _src: &str) -> String {
+    fn s_expr(&self) -> String {
         match self {
             LiteralKind::Int(value) => format!("{value}"),
             LiteralKind::Float(value) => format!("{value}"),
@@ -175,11 +168,11 @@ impl SExpr for LiteralKind {
 }
 
 impl<T: SExpr> SExpr for Vec<T> {
-    fn s_expr(&self, src: &str) -> String {
+    fn s_expr(&self) -> String {
         format!(
             "{}",
             self.iter()
-                .map(|e| e.s_expr(src))
+                .map(|e| e.s_expr())
                 .collect::<Vec<String>>()
                 .join(" ")
         )
@@ -187,17 +180,17 @@ impl<T: SExpr> SExpr for Vec<T> {
 }
 
 impl<T: SExpr> SExpr for Option<Box<T>> {
-    fn s_expr(&self, src: &str) -> String {
+    fn s_expr(&self) -> String {
         match self {
             None => "".to_string(),
-            Some(e) => e.s_expr(&src),
+            Some(e) => e.s_expr(),
         }
     }
 }
 
 fn s_expr(src: &str) -> String {
     match parse(src) {
-        Ok(module) => module.s_expr(src),
+        Ok(module) => module.s_expr(),
         Err(dynamic_error) => {
             let mut nice_error = Vec::new();
             if let Some(e) = dynamic_error.downcast_ref::<ParseError>() {
