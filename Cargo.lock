@@ -274,18 +274,18 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
 name = "wasm-encoder"
-version = "0.210.0"
+version = "0.212.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7e3764d9d6edabd8c9e16195e177be0d20f6ab942ad18af52860f12f82bc59a"
+checksum = "501940df4418b8929eb6d52f1aade1fdd15a5b86c92453cb696e3c906bd3fc33"
 dependencies = [
  "leb128",
 ]
 
 [[package]]
 name = "wasmi"
-version = "0.32.3"
+version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50386c99b9c32bd2ed71a55b6dd4040af2580530fae8bdb9a6576571a80d0cca"
+checksum = "8c97eb5a79e7e191374c3d0919ac29e8f1bb2cb8b418a599af5e14eb5debfacf"
 dependencies = [
  "arrayvec",
  "multi-stash",
@@ -300,9 +300,9 @@ dependencies = [
 
 [[package]]
 name = "wasmi_collections"
-version = "0.32.3"
+version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c128c039340ffd50d4195c3f8ce31aac357f06804cfc494c8b9508d4b30dca4"
+checksum = "f5ff83fe8f02574b8bd980568bfe8e3c45ede7dedc5c9fca2587f35deace245f"
 dependencies = [
  "ahash",
  "hashbrown",
@@ -311,9 +311,9 @@ dependencies = [
 
 [[package]]
 name = "wasmi_core"
-version = "0.32.3"
+version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a23b3a7f6c8c3ceeec6b83531ee61f0013c56e51cbf2b14b0f213548b23a4b41"
+checksum = "68287cf8b7c922ba09285bfa35276ea16ebe2ac874f22a99379d00a538cb3dfd"
 dependencies = [
  "downcast-rs",
  "libm",
@@ -323,9 +323,9 @@ dependencies = [
 
 [[package]]
 name = "wasmparser"
-version = "0.210.0"
+version = "0.212.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7bbcd21e7581619d9f6ca00f8c4f08f1cacfe58bf63f83af57cd0476f1026f5"
+checksum = "8d28bc49ba1e5c5b61ffa7a2eace10820443c4b7d1c0b144109261d14570fdf8"
 dependencies = [
  "bitflags",
  "indexmap",
@@ -342,9 +342,9 @@ dependencies = [
 
 [[package]]
 name = "wasmprinter"
-version = "0.210.0"
+version = "0.212.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7aee6f23623621e3027886a090bf7ff6fcf270bcc01fb6f74810d49dcc19a7f"
+checksum = "dfac65326cc561112af88c3028f6dfdb140acff67ede33a8e86be2dc6b8956f7"
 dependencies = [
  "anyhow",
  "termcolor",
