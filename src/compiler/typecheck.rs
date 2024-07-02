@@ -1,7 +1,7 @@
-use crate::ast::{Expr, ExprKind, Function, LiteralKind, Stmt, StmtKind};
-use crate::compiler::{compile_error, Compiler, Ty};
-use crate::lexer::TokenKind;
 use anyhow::Result;
+
+use crate::ast::{BinOpKind, Expr, ExprKind, Function, LiteralKind, Stmt, StmtKind};
+use crate::compiler::{compile_error, Compiler, Ty};
 
 impl Compiler {
     pub(super) fn type_check_function(&mut self, function: &Function) -> Result<()> {
@@ -19,42 +19,6 @@ impl Compiler {
             StmtKind::ExprStmt(expr) => {
                 self.type_check_expr(expr)?;
             }
-            // StmtKind::Call { callee, args } => {
-            //     let callee_name = callee.span.as_str(self.source);
-            //     if args.len() != 1 {
-            //         return compile_error(
-            //             format!("The '{callee_name}' function requires a single argument"),
-            //             stmt.node.span,
-            //         );
-            //     }
-            //     let arg_ty = self.type_check_expr(&args[0])?;
-            //     match callee_name {
-            //         "print" => {} // TODO: Strings
-            //         "print_int" => {
-            //             if arg_ty != Ty::Int {
-            //                 return compile_error(
-            //                     "Function 'print_int' requires an int as argument",
-            //                     stmt.node.span,
-            //                 );
-            //             }
-            //         }
-            //         "print_float" => {
-            //             if arg_ty != Ty::Float {
-            //                 return compile_error(
-            //                     "Function 'print_float' requires an float as argument",
-            //                     stmt.node.span,
-            //                 );
-            //             }
-            //         }
-            //
-            //         _ => {
-            //             return compile_error(
-            //                 format!("Unknown function '{callee_name}'"),
-            //                 stmt.node.span,
-            //             )
-            //         } // TODO: duplicated error in compilation
-            //     }
-            // }
             StmtKind::Declaration { name, value, .. } => {
                 let var_ty = self.symbol_table.lookup_var(name)?.ty;
                 if let Some(value) = value {
@@ -137,7 +101,7 @@ impl Compiler {
                     );
                 }
 
-                if operator.kind == TokenKind::Percent && left_ty == Ty::Float {
+                if operator.kind == BinOpKind::Mod && left_ty == Ty::Float {
                     return compile_error(
                         "Type Error: '%' operator doesn't work on floats",
                         expr.node.span,
@@ -145,12 +109,12 @@ impl Compiler {
                 }
 
                 match operator.kind {
-                    TokenKind::LessEqual
-                    | TokenKind::Less
-                    | TokenKind::EqualEqual
-                    | TokenKind::BangEqual
-                    | TokenKind::GreaterEqual
-                    | TokenKind::Greater => Ty::Bool,
+                    BinOpKind::Le
+                    | BinOpKind::Lt
+                    | BinOpKind::Eq
+                    | BinOpKind::Ne
+                    | BinOpKind::Ge
+                    | BinOpKind::Gt => Ty::Bool,
                     _ => left_ty,
                 }
             }

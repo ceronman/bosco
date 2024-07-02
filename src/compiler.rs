@@ -9,10 +9,11 @@ use wasm_encoder::{
 
 use crate::ast;
 use crate::ast::{
-    Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind, Symbol,
+    BinOpKind, Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind,
+    Symbol,
 };
 use crate::compiler::resolution::SymbolTable;
-use crate::lexer::{Span, TokenKind};
+use crate::lexer::Span;
 use crate::parser::parse;
 
 mod resolution;
@@ -301,45 +302,45 @@ impl Compiler {
                 };
 
                 // TODO: Not deal with tokens here?
-                let ins = match (operator.kind, ty) {
-                    (TokenKind::EqualEqual, Ty::Int) => Instruction::I32Eq,
-                    (TokenKind::EqualEqual, Ty::Float) => Instruction::F64Eq,
+                let ins = match (&operator.kind, ty) {
+                    (BinOpKind::Eq, Ty::Int) => Instruction::I32Eq,
+                    (BinOpKind::Eq, Ty::Float) => Instruction::F64Eq,
 
-                    (TokenKind::BangEqual, Ty::Int) => Instruction::I32Ne,
-                    (TokenKind::BangEqual, Ty::Float) => Instruction::F64Ne,
+                    (BinOpKind::Ne, Ty::Int) => Instruction::I32Ne,
+                    (BinOpKind::Ne, Ty::Float) => Instruction::F64Ne,
 
-                    (TokenKind::Greater, Ty::Int) => Instruction::I32GtS,
-                    (TokenKind::Greater, Ty::Float) => Instruction::F64Gt,
+                    (BinOpKind::Gt, Ty::Int) => Instruction::I32GtS,
+                    (BinOpKind::Gt, Ty::Float) => Instruction::F64Gt,
 
-                    (TokenKind::GreaterEqual, Ty::Int) => Instruction::I32GeS,
-                    (TokenKind::GreaterEqual, Ty::Float) => Instruction::F64Ge,
+                    (BinOpKind::Ge, Ty::Int) => Instruction::I32GeS,
+                    (BinOpKind::Ge, Ty::Float) => Instruction::F64Ge,
 
-                    (TokenKind::Less, Ty::Int) => Instruction::I32LtS,
-                    (TokenKind::Less, Ty::Float) => Instruction::F64Lt,
+                    (BinOpKind::Lt, Ty::Int) => Instruction::I32LtS,
+                    (BinOpKind::Lt, Ty::Float) => Instruction::F64Lt,
 
-                    (TokenKind::LessEqual, Ty::Int) => Instruction::I32LeS,
-                    (TokenKind::LessEqual, Ty::Float) => Instruction::F64Le,
+                    (BinOpKind::Le, Ty::Int) => Instruction::I32LeS,
+                    (BinOpKind::Le, Ty::Float) => Instruction::F64Le,
 
-                    (TokenKind::Plus, Ty::Int) => Instruction::I32Add,
-                    (TokenKind::Plus, Ty::Float) => Instruction::I32Add,
+                    (BinOpKind::Add, Ty::Int) => Instruction::I32Add,
+                    (BinOpKind::Add, Ty::Float) => Instruction::I32Add,
 
-                    (TokenKind::Minus, Ty::Int) => Instruction::I32Sub,
-                    (TokenKind::Minus, Ty::Float) => Instruction::F64Sub,
+                    (BinOpKind::Sub, Ty::Int) => Instruction::I32Sub,
+                    (BinOpKind::Sub, Ty::Float) => Instruction::F64Sub,
 
-                    (TokenKind::Star, Ty::Int) => Instruction::I32Mul,
-                    (TokenKind::Star, Ty::Float) => Instruction::F64Mul,
+                    (BinOpKind::Mul, Ty::Int) => Instruction::I32Mul,
+                    (BinOpKind::Mul, Ty::Float) => Instruction::F64Mul,
 
-                    (TokenKind::Slash, Ty::Int) => Instruction::I32DivS,
-                    (TokenKind::Slash, Ty::Float) => Instruction::F64Div,
+                    (BinOpKind::Div, Ty::Int) => Instruction::I32DivS,
+                    (BinOpKind::Div, Ty::Float) => Instruction::F64Div,
 
-                    (TokenKind::Percent, Ty::Int) => Instruction::I32RemS,
+                    (BinOpKind::Mod, Ty::Int) => Instruction::I32RemS,
                     _ => {
                         return compile_error(
                             format!(
                                 "Operator '{:?}' is not supported for type {ty:?}",
                                 operator.kind
                             ),
-                            operator.span,
+                            operator.node.span,
                         )
                     }
                 };

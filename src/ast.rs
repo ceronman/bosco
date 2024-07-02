@@ -1,5 +1,6 @@
-use crate::lexer::{Span, Token};
 use std::fmt::{Display, Formatter};
+
+use crate::lexer::Span;
 
 pub type NodeId = u32;
 
@@ -24,6 +25,7 @@ impl From<&str> for Symbol {
     }
 }
 
+// TODO: Implement inheritance like using Node<T> and Deref, AsRef, etc
 #[derive(Copy, Clone, Debug)]
 pub struct Node {
     pub id: NodeId,
@@ -110,7 +112,7 @@ pub enum ExprKind {
     Binary {
         left: Box<Expr>,
         right: Box<Expr>,
-        operator: Token,
+        operator: BinOp,
     },
     Or {
         left: Box<Expr>,
@@ -127,6 +129,29 @@ pub enum ExprKind {
         callee: Box<Expr>,
         args: Vec<Expr>,
     },
+}
+
+#[derive(Debug)]
+pub struct BinOp {
+    pub node: Node,
+    pub kind: BinOpKind,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum BinOpKind {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    And,
+    Or,
 }
 
 #[derive(Debug)]

@@ -371,7 +371,7 @@ fn test_type_errors() {
                 let z int = x + y
             }
         "#,
-        "Compilation Error: Type Error: operator Plus has incompatible types Int and Float at Span(124, 129)",
+        "Compilation Error: Type Error: operator Add has incompatible types Int and Float at Span(124, 129)",
     );
 
     assert_error(
@@ -394,7 +394,7 @@ fn test_type_errors() {
                 let z int = x % y
             }
         "#,
-        "Compilation Error: Type Error: operator Percent has incompatible types Int and Float at Span(124, 129)",
+        "Compilation Error: Type Error: operator Mod has incompatible types Int and Float at Span(124, 129)",
     );
 
     assert_error(

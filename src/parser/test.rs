@@ -4,8 +4,8 @@ use std::str::Chars;
 use ariadne::{Label, Report, ReportKind, Source};
 
 use crate::ast::{
-    Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module, Param, Stmt,
-    StmtKind,
+    BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module,
+    Param, Stmt, StmtKind,
 };
 use crate::lexer::Token;
 use crate::parser::{parse, ParseError};
@@ -133,6 +133,27 @@ impl SExpr for Expr {
                 format!("(call {} {})", callee.s_expr(src), args.s_expr(src))
             }
         }
+    }
+}
+
+impl SExpr for BinOp {
+    fn s_expr(&self, src: &str) -> String {
+        match self.kind {
+            BinOpKind::Add => "+",
+            BinOpKind::Sub => "-",
+            BinOpKind::Mul => "*",
+            BinOpKind::Div => "/",
+            BinOpKind::Mod => "%",
+            BinOpKind::Eq => "==",
+            BinOpKind::Ne => "!=",
+            BinOpKind::Lt => "<",
+            BinOpKind::Le => "<=",
+            BinOpKind::Gt => ">",
+            BinOpKind::Ge => ">=",
+            BinOpKind::And => "and",
+            BinOpKind::Or => "or",
+        }
+        .into()
     }
 }
 

@@ -3,8 +3,8 @@ mod test;
 
 use crate::ast::StmtKind::ExprStmt;
 use crate::ast::{
-    Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module, Node, NodeId, Param,
-    Stmt, StmtKind, Symbol, Ty,
+    BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module,
+    Node, NodeId, Param, Stmt, StmtKind, Symbol, Ty,
 };
 use crate::lexer::{Lexer, Span, Token, TokenKind};
 use anyhow::Result;
@@ -162,8 +162,35 @@ impl<'src> Parser<'src> {
             if precedence < min_precedence {
                 break;
             }
-            self.advance();
+
+            // TODO: Ugly, cleanup!
+            if let TokenKind::LParen = operator.kind {
+                self.advance();
+                let mut args = Vec::new();
+                if self.token.kind != TokenKind::RParen {
+                    loop {
+                        self.maybe_eol();
+                        args.push(self.expression()?);
+
+                        if !self.eat(TokenKind::Comma) {
+                            break;
+                        }
+                    }
+                }
+                let rparen = self.expect(TokenKind::RParen)?;
+                left = Expr {
+                    node: self.node(left.node.span, rparen.span),
+                    kind: ExprKind::Call {
+                        callee: Box::new(left),
+                        args,
+                    },
+                };
+                continue;
+            }
+
+            let binop = self.binop()?;
             // TODO: Generalize?
+            // TODO: Make and and left binop
             left = match operator.kind {
                 TokenKind::Or => {
                     let right = self.expression_precedence(precedence + 1)?;
@@ -185,27 +212,6 @@ impl<'src> Parser<'src> {
                         },
                     }
                 }
-                TokenKind::LParen => {
-                    let mut args = Vec::new();
-                    if self.token.kind != TokenKind::RParen {
-                        loop {
-                            self.maybe_eol();
-                            args.push(self.expression()?);
-
-                            if !self.eat(TokenKind::Comma) {
-                                break;
-                            }
-                        }
-                    }
-                    let rparen = self.expect(TokenKind::RParen)?;
-                    Expr {
-                        node: self.node(left.node.span, rparen.span),
-                        kind: ExprKind::Call {
-                            callee: Box::new(left),
-                            args,
-                        },
-                    }
-                }
                 _ => {
                     let right = self.expression_precedence(precedence + 1)?;
                     Expr {
@@ -213,13 +219,38 @@ impl<'src> Parser<'src> {
                         kind: ExprKind::Binary {
                             left: Box::new(left),
                             right: Box::new(right),
-                            operator,
+                            operator: binop,
                         },
                     }
                 }
             };
         }
         Ok(left)
+    }
+
+    fn binop(&mut self) -> Result<BinOp> {
+        let op = self.token;
+        let kind = match op.kind {
+            TokenKind::Plus => BinOpKind::Add,
+            TokenKind::Minus => BinOpKind::Sub,
+            TokenKind::Star => BinOpKind::Mul,
+            TokenKind::Slash => BinOpKind::Div,
+            TokenKind::Percent => BinOpKind::Mod,
+            TokenKind::EqualEqual => BinOpKind::Eq,
+            TokenKind::BangEqual => BinOpKind::Ne,
+            TokenKind::Less => BinOpKind::Lt,
+            TokenKind::LessEqual => BinOpKind::Le,
+            TokenKind::Greater => BinOpKind::Gt,
+            TokenKind::GreaterEqual => BinOpKind::Ge,
+            TokenKind::And => BinOpKind::And,
+            TokenKind::Or => BinOpKind::Or,
+            _ => return self.error(format!("Invalid binary operator {op:?}")),
+        };
+        self.advance();
+        Ok(BinOp {
+            node: self.node(op.span, op.span),
+            kind,
+        })
     }
 
     fn binary_precedence(&self, operator: TokenKind) -> Option<u8> {
