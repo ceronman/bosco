@@ -141,7 +141,7 @@ impl SExpr for LiteralKind {
         match self {
             LiteralKind::Int(value) => format!("{value}"),
             LiteralKind::Float(value) => format!("{value}"),
-            LiteralKind::String { value, .. } => format!("\"{value}\""),
+            LiteralKind::String(symbol) => format!("\"{symbol}\""),
             LiteralKind::Bool(value) => {
                 if *value {
                     format!("true")

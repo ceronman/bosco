@@ -1,18 +1,19 @@
 use std::collections::HashMap;
 
-use crate::ast;
-use crate::ast::{
-    Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind, Symbol,
-};
-use crate::compiler::resolution::SymbolTable;
-use crate::lexer::{Span, Token, TokenKind};
-use crate::parser::parse;
 use anyhow::Result;
 use thiserror::Error;
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
     FunctionSection, ImportSection, Instruction, MemoryType, TypeSection, ValType,
 };
+
+use crate::ast;
+use crate::ast::{
+    Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind, Symbol,
+};
+use crate::compiler::resolution::SymbolTable;
+use crate::lexer::{Span, TokenKind};
+use crate::parser::parse;
 
 mod resolution;
 #[cfg(test)]
@@ -91,7 +92,7 @@ impl Counter {
 
 #[derive(Default)]
 struct Compiler {
-    strings: HashMap<Token, WasmStr>,
+    strings: HashMap<NodeId, WasmStr>,
     symbol_table: SymbolTable,
     expression_types: HashMap<NodeId, Ty>,
     types: TypeSection,
@@ -273,18 +274,18 @@ impl Compiler {
             ExprKind::Literal(LiteralKind::Float(value)) => {
                 func.instruction(&Instruction::F64Const(*value));
             }
-            ExprKind::Literal(LiteralKind::String { token, value }) => {
+            ExprKind::Literal(LiteralKind::String(symbol)) => {
                 let wasm_str = WasmStr {
                     memory: Compiler::MEM,
                     offset: self.data_offset,
-                    len: value.len() as u32,
+                    len: symbol.as_str().len() as u32,
                 };
                 self.data_offset += wasm_str.len;
-                self.strings.insert(*token, wasm_str);
+                self.strings.insert(expr.node.id, wasm_str);
                 self.data.active(
                     wasm_str.memory,
                     &ConstExpr::i32_const(wasm_str.offset as i32),
-                    value.bytes(),
+                    symbol.as_str().bytes(),
                 );
             }
             ExprKind::Binary {
@@ -388,20 +389,22 @@ impl Compiler {
                     return compile_error("Unresolved function", expr.node.span);
                 };
 
+                let arg = &args[0];
+
                 // TODO: Hack!
                 if name.symbol.as_str() == "print" {
-                    if let ExprKind::Literal(LiteralKind::String { token, .. }) = args[0].kind {
-                        self.expression(func, &args[0])?; // Needed to add the string value to data
-                        let Some(was_str) = self.strings.get(&token) else {
-                            return compile_error("String constant not found", token.span);
+                    return if let ExprKind::Literal(LiteralKind::String(_)) = &arg.kind {
+                        self.expression(func, arg)?; // Needed to add the string value to data
+                        let Some(was_str) = self.strings.get(&arg.node.id) else {
+                            return compile_error("String constant not found", arg.node.span);
                         };
                         func.instruction(&Instruction::I32Const(was_str.offset as i32));
                         func.instruction(&Instruction::I32Const(was_str.len as i32));
                         func.instruction(&Instruction::Call(signature.index));
-                        return Ok(());
+                        Ok(())
                     } else {
-                        return compile_error("Incorrect arguments for 'print'!", expr.node.span);
-                    }
+                        compile_error("Incorrect arguments for 'print'!", expr.node.span)
+                    };
                 }
 
                 for arg in args {

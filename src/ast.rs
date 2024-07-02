@@ -134,7 +134,7 @@ pub enum LiteralKind {
     Int(i32),
     Float(f64),
     Bool(bool),
-    String { token: Token, value: String },
+    String(Symbol),
 }
 
 #[derive(Debug)]

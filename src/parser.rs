@@ -4,7 +4,7 @@ mod test;
 use crate::ast::StmtKind::ExprStmt;
 use crate::ast::{
     Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module, Node, NodeId, Param,
-    Stmt, StmtKind, Ty,
+    Stmt, StmtKind, Symbol, Ty,
 };
 use crate::lexer::{Lexer, Span, Token, TokenKind};
 use anyhow::Result;
@@ -258,9 +258,10 @@ impl<'src> Parser<'src> {
             TokenKind::True => ExprKind::Literal(LiteralKind::Bool(true)),
             TokenKind::False => ExprKind::Literal(LiteralKind::Bool(false)),
             TokenKind::Str => {
+                // TODO: Improve parsing!
                 let lexeme = self.token.span.as_str(self.source);
-                let value = lexeme[1..(lexeme.len() - 1)].to_string(); // TODO: Improve
-                ExprKind::Literal(LiteralKind::String { token, value })
+                let value = &lexeme[1..(lexeme.len() - 1)];
+                ExprKind::Literal(LiteralKind::String(Symbol::from(value)))
             }
             TokenKind::Int => {
                 let value = token.span.as_str(self.source);
