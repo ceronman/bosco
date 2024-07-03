@@ -489,3 +489,14 @@ fn test_block() {
         )
     }
 }
+
+#[test]
+fn test_comments() {
+    test_main! {
+        r#"
+            // This is a comment
+            /*this*/print/*is*/(/*very*/"hello"/*annoying*/)/*!*/
+        "#,
+        (call print "hello")
+    }
+}

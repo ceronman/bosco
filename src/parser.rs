@@ -29,7 +29,7 @@ impl<'src> Parser<'src> {
         let mut lexer = Lexer::new(source);
         Parser {
             source,
-            token: lexer.skip_ws(),
+            token: lexer.next_token(),
             lexer,
             id_counter: 0,
         }
@@ -403,11 +403,11 @@ impl<'src> Parser<'src> {
     }
 
     fn peek(&self) -> Token {
-        self.lexer.clone().skip_ws()
+        self.lexer.clone().next_non_trivial_token()
     }
 
     fn advance(&mut self) {
-        self.token = self.lexer.skip_ws();
+        self.token = self.lexer.next_non_trivial_token();
     }
 
     fn eat(&mut self, kind: TokenKind) -> bool {
@@ -432,7 +432,7 @@ impl<'src> Parser<'src> {
     ) -> Result<Token> {
         let token = self.token;
         if token.kind == token_kind {
-            self.token = self.lexer.skip_ws();
+            self.advance();
             return Ok(token);
         }
 

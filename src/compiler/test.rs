@@ -1,6 +1,7 @@
 use ariadne::{Label, Report, ReportKind, Source};
+use regex::Regex;
+use std::ops::Range;
 use std::sync::{Arc, Mutex};
-
 use wasmi::{Caller, Engine, Func, Linker, Memory, MemoryType, Module, Store};
 
 use crate::compiler::{compile, CompileError};
@@ -309,147 +310,193 @@ fn test_functions() {
     )
 }
 
-fn assert_error(source: &str, expected: &str) {
-    match compile(source) {
+fn assert_error(annotated_source: &str) {
+    let error_re = Regex::new(r"^\s*//\s*(\^*)\s+(.*)\n$").unwrap();
+    let mut offset = 0;
+    let mut source = String::new();
+    let mut range = 0..0;
+    let mut message = String::new();
+    let mut last_len = 0;
+    for line in annotated_source.split_inclusive('\n') {
+        if let Some(captures) = error_re.captures(line) {
+            let m = captures.get(1).unwrap();
+            let Range { start, end } = m.range();
+            range = (offset - last_len + start)..(offset - last_len + end);
+            message.push_str(&captures[2]);
+        } else {
+            source.push_str(line);
+            offset += line.len();
+            last_len = line.len();
+        }
+    }
+
+    match compile(&source) {
         Ok(_) => panic!("No error returned"),
-        Err(e) => {
-            assert_eq!(format!("{e}"), expected)
+        Err(dynamic_error) => {
+            if let Some(e) = dynamic_error.downcast_ref::<CompileError>() {
+                assert_eq!(format!("CompileError: {}", e.msg), message);
+                if !range.is_empty() {
+                    assert_eq!((e.span.0)..(e.span.1), range)
+                }
+            } else if let Some(e) = dynamic_error.downcast_ref::<ParseError>() {
+                assert_eq!(format!("ParseError: {}", e.msg), message);
+                if !range.is_empty() {
+                    assert_eq!((e.span.0)..(e.span.1), range)
+                }
+            } else {
+                panic!("Unknown error {dynamic_error:?}")
+            }
         }
     }
 }
 
-// TODO: Make the spans not a nightmare please!!!
 #[test]
 fn test_errors() {
     assert_error(
-        "export fn main() { print() }",
-        "Compilation Error: The 'print' function requires a single argument at Span(19, 26)",
-    );
-    assert_error(
-        "export fn main() { print(",
-        "Parse Error: Expected expression, got Eof at Span(25, 25)",
-    );
-    assert_error(
-        "export fn main() { x = 1 }",
-        "Compilation Error: Undeclared variable 'x' at Span(19, 20)",
+        r#"
+        export fn main() {
+            print()
+          //^^^^^^^ CompileError: The 'print' function requires a single argument
+        }"#,
     );
     assert_error(
         r#"
-            export fn main() {
-                let x int = 1
-                let x int = 2
-            }
-    "#,
-        "Compilation Error: Variable 'x' was already declared in this scope at Span(82, 83)",
+        export fn main() {
+            print(
+                // ParseError: Expected expression, got Eof
+        "#,
     );
     assert_error(
-        "export fn main() { let x = 1 }",
-        "Parse Error: Expected type, found Equal instead at Span(25, 26)",
+        r#"
+        export fn main() {
+            x = 1
+          //^ CompileError: Undeclared variable 'x'
+        }"#,
+    );
+    assert_error(
+        r#"
+        export fn main() {
+            let x int = 1
+            let x int = 2
+        //      ^ CompileError: Variable 'x' was already declared in this scope
+        }"#,
+    );
+    assert_error(
+        r#"
+        export fn main() {
+            let x = 1
+                //^ ParseError: Expected type, found Equal instead
+        }"#,
     );
 }
 
 #[test]
 fn test_type_errors() {
     assert_error(
-        "export fn main() { let x float = 1 }",
-        "Compilation Error: Type Error: expected Float but found Int at Span(33, 34)",
-    );
-    assert_error(
         r#"
-            export fn main() {
-                let x int = 1
-                let y float = x
-            }
-        "#,
-        "Compilation Error: Type Error: expected Float but found Int at Span(92, 93)",
-    );
-    assert_error(
-        r#"
-            export fn main() {
-                let x int = 1
-                let y float = 1.5
-                let z int = x + y
-            }
-        "#,
-        "Compilation Error: Type Error: operator Add has incompatible types Int and Float at Span(124, 129)",
+        export fn main() {
+            let x float = 1
+                        //^ CompileError: Type Error: expected Float but found Int
+        }"#,
     );
 
     assert_error(
         r#"
-            export fn main() {
-                let x int = 1
-                if 2 > 1 {
-                    x = 1.5
-                }
-            }
-        "#,
-        "Compilation Error: Type Error: expected Int but found Float at Span(113, 116)",
+        export fn main() {
+            let x int = 1
+            let y float = x
+                        //^ CompileError: Type Error: expected Float but found Int
+        }"#,
     );
 
     assert_error(
         r#"
-            export fn main() {
-                let x int = 1
-                let y float = 1.5
-                let z int = x % y
-            }
-        "#,
-        "Compilation Error: Type Error: operator Mod has incompatible types Int and Float at Span(124, 129)",
+        export fn main() {
+            let x int = 1
+            let y float = 1.5
+            let z int = x + y
+                      //^^^^^ CompileError: Type Error: operator Add has incompatible types Int and Float
+        }"#,
     );
 
     assert_error(
         r#"
-            export fn main() {
-                let x float = 1.0
-                let y float = 1.5
-                let z int = x % y
+        export fn main() {
+            let x int = 1
+            if 2 > 1 {
+                x = 1.5
+                  //^^^ CompileError: Type Error: expected Int but found Float
             }
-        "#,
-        "Compilation Error: Type Error: '%' operator doesn't work on floats at Span(128, 133)",
-    );
-
-    assert_error(
-        "export fn main() { print_int(1.5) }",
-        "Compilation Error: Type Error: argument type mismatch at Span(29, 32)",
-    );
-
-    assert_error(
-        "export fn main() { print_float(1) }",
-        "Compilation Error: Type Error: argument type mismatch at Span(31, 32)",
+        }"#,
     );
 
     assert_error(
         r#"
-            export fn main() {
-                if 1 {
-                    print("hello")
-                }
-            }
-        "#,
-        "Compilation Error: Type Error: condition should be 'bool', but got Int at Span(51, 52)",
+        export fn main() {
+            let x int = 1
+            let y float = 1.5
+            let z int = x % y
+                      //^^^^^ CompileError: Type Error: operator Mod has incompatible types Int and Float
+        }"#,
     );
 
     assert_error(
         r#"
-            export fn main() {
-                while 0.0 {
-                    print("hello")
-                }
-            }
-        "#,
-        "Compilation Error: Type Error: condition should be 'bool', but got Float at Span(54, 57)",
+        export fn main() {
+            let x float = 1.0
+            let y float = 1.5
+            let z int = x % y
+                      //^^^^^ CompileError: Type Error: '%' operator doesn't work on floats
+        }"#,
     );
 
     assert_error(
         r#"
-            export fn main() {
-                let x int = 1
-                let y int = 1
-                if x or y {
-                    print("foo!")
-                }
+        export fn main() {
+            print_int(1.5)
+                    //^^^ CompileError: Type Error: argument type mismatch
+        }"#,
+    );
+
+    assert_error(
+        r#"
+        export fn main() {
+            print_float(1)
+                      //^ CompileError: Type Error: argument type mismatch
+        }"#,
+    );
+
+    assert_error(
+        r#"
+        export fn main() {
+            if 1 {
+             //^ CompileError: Type Error: condition should be 'bool', but got Int
+
+                print("hello")
             }
-        "#,
-        "Compilation Error: Type Error: operand should be 'bool' at Span(111, 112)",
+        }"#,
+    );
+
+    assert_error(
+        r#"
+        export fn main() {
+            while 0.0 {
+                //^^^ CompileError: Type Error: condition should be 'bool', but got Float
+                print("hello")
+            }
+        }"#,
+    );
+
+    assert_error(
+        r#"
+        export fn main() {
+            let x int = 1
+            let y int = 1
+            if x or y {
+             //^ CompileError: Type Error: operand should be 'bool'
+
+                print("foo!")
+            }
+        }"#,
     );
 }
