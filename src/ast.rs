@@ -113,14 +113,6 @@ pub enum ExprKind {
         right: Box<Expr>,
         operator: BinOp,
     },
-    Or {
-        left: Box<Expr>,
-        right: Box<Expr>,
-    },
-    And {
-        left: Box<Expr>,
-        right: Box<Expr>,
-    },
     Not {
         right: Box<Expr>,
     },

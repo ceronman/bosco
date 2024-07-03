@@ -294,6 +294,28 @@ impl Compiler {
                 right,
                 operator,
             } => {
+                match &operator.kind {
+                    BinOpKind::And => {
+                        self.expression(func, left)?;
+                        func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+                        self.expression(func, right)?;
+                        func.instruction(&Instruction::Else);
+                        func.instruction(&Instruction::I32Const(0));
+                        func.instruction(&Instruction::End);
+                        return Ok(());
+                    }
+                    BinOpKind::Or => {
+                        self.expression(func, left)?;
+                        func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+                        func.instruction(&Instruction::I32Const(1));
+                        func.instruction(&Instruction::Else);
+                        self.expression(func, right)?;
+                        func.instruction(&Instruction::End);
+                        return Ok(());
+                    }
+                    _ => {}
+                }
+
                 self.expression(func, left)?;
                 self.expression(func, right)?;
 
@@ -301,39 +323,39 @@ impl Compiler {
                     return compile_error("Fatal: Not type found for expression", left.node.span);
                 };
 
-                // TODO: Not deal with tokens here?
-                let ins = match (&operator.kind, ty) {
-                    (BinOpKind::Eq, Ty::Int) => Instruction::I32Eq,
-                    (BinOpKind::Eq, Ty::Float) => Instruction::F64Eq,
+                match (&operator.kind, ty) {
+                    (BinOpKind::Eq, Ty::Int) => func.instruction(&Instruction::I32Eq),
+                    (BinOpKind::Eq, Ty::Float) => func.instruction(&Instruction::F64Eq),
 
-                    (BinOpKind::Ne, Ty::Int) => Instruction::I32Ne,
-                    (BinOpKind::Ne, Ty::Float) => Instruction::F64Ne,
+                    (BinOpKind::Ne, Ty::Int) => func.instruction(&Instruction::I32Ne),
+                    (BinOpKind::Ne, Ty::Float) => func.instruction(&Instruction::F64Ne),
 
-                    (BinOpKind::Gt, Ty::Int) => Instruction::I32GtS,
-                    (BinOpKind::Gt, Ty::Float) => Instruction::F64Gt,
+                    (BinOpKind::Gt, Ty::Int) => func.instruction(&Instruction::I32GtS),
+                    (BinOpKind::Gt, Ty::Float) => func.instruction(&Instruction::F64Gt),
 
-                    (BinOpKind::Ge, Ty::Int) => Instruction::I32GeS,
-                    (BinOpKind::Ge, Ty::Float) => Instruction::F64Ge,
+                    (BinOpKind::Ge, Ty::Int) => func.instruction(&Instruction::I32GeS),
+                    (BinOpKind::Ge, Ty::Float) => func.instruction(&Instruction::F64Ge),
 
-                    (BinOpKind::Lt, Ty::Int) => Instruction::I32LtS,
-                    (BinOpKind::Lt, Ty::Float) => Instruction::F64Lt,
+                    (BinOpKind::Lt, Ty::Int) => func.instruction(&Instruction::I32LtS),
+                    (BinOpKind::Lt, Ty::Float) => func.instruction(&Instruction::F64Lt),
 
-                    (BinOpKind::Le, Ty::Int) => Instruction::I32LeS,
-                    (BinOpKind::Le, Ty::Float) => Instruction::F64Le,
+                    (BinOpKind::Le, Ty::Int) => func.instruction(&Instruction::I32LeS),
+                    (BinOpKind::Le, Ty::Float) => func.instruction(&Instruction::F64Le),
 
-                    (BinOpKind::Add, Ty::Int) => Instruction::I32Add,
-                    (BinOpKind::Add, Ty::Float) => Instruction::I32Add,
+                    (BinOpKind::Add, Ty::Int) => func.instruction(&Instruction::I32Add),
+                    (BinOpKind::Add, Ty::Float) => func.instruction(&Instruction::I32Add),
 
-                    (BinOpKind::Sub, Ty::Int) => Instruction::I32Sub,
-                    (BinOpKind::Sub, Ty::Float) => Instruction::F64Sub,
+                    (BinOpKind::Sub, Ty::Int) => func.instruction(&Instruction::I32Sub),
+                    (BinOpKind::Sub, Ty::Float) => func.instruction(&Instruction::F64Sub),
 
-                    (BinOpKind::Mul, Ty::Int) => Instruction::I32Mul,
-                    (BinOpKind::Mul, Ty::Float) => Instruction::F64Mul,
+                    (BinOpKind::Mul, Ty::Int) => func.instruction(&Instruction::I32Mul),
+                    (BinOpKind::Mul, Ty::Float) => func.instruction(&Instruction::F64Mul),
 
-                    (BinOpKind::Div, Ty::Int) => Instruction::I32DivS,
-                    (BinOpKind::Div, Ty::Float) => Instruction::F64Div,
+                    (BinOpKind::Div, Ty::Int) => func.instruction(&Instruction::I32DivS),
+                    (BinOpKind::Div, Ty::Float) => func.instruction(&Instruction::F64Div),
 
-                    (BinOpKind::Mod, Ty::Int) => Instruction::I32RemS,
+                    (BinOpKind::Mod, Ty::Int) => func.instruction(&Instruction::I32RemS),
+
                     _ => {
                         return compile_error(
                             format!(
@@ -344,24 +366,8 @@ impl Compiler {
                         )
                     }
                 };
-                func.instruction(&ins);
             }
-            ExprKind::Or { left, right } => {
-                self.expression(func, left)?;
-                func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
-                func.instruction(&Instruction::I32Const(1));
-                func.instruction(&Instruction::Else);
-                self.expression(func, right)?;
-                func.instruction(&Instruction::End);
-            }
-            ExprKind::And { left, right } => {
-                self.expression(func, left)?;
-                func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
-                self.expression(func, right)?;
-                func.instruction(&Instruction::Else);
-                func.instruction(&Instruction::I32Const(0));
-                func.instruction(&Instruction::End);
-            }
+
             ExprKind::Not { right } => {
                 self.expression(func, right)?;
                 func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));

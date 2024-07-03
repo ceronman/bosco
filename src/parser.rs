@@ -54,7 +54,7 @@ impl<'src> Parser<'src> {
     fn item(&mut self) -> Result<Item> {
         match self.token.kind {
             TokenKind::Fn | TokenKind::Export => self.function(),
-            other => self.error(format!("Expected declaration, got {other:?}")),
+            other => self.parse_error(format!("Expected declaration, got {other:?}")),
         }
     }
 
@@ -189,41 +189,16 @@ impl<'src> Parser<'src> {
             }
 
             let binop = self.binop()?;
-            // TODO: Generalize?
-            // TODO: Make and and left binop
-            left = match operator.kind {
-                TokenKind::Or => {
-                    let right = self.expression_precedence(precedence + 1)?;
-                    Expr {
-                        node: self.node(left.node.span, right.node.span),
-                        kind: ExprKind::Or {
-                            left: Box::new(left),
-                            right: Box::new(right),
-                        },
-                    }
-                }
-                TokenKind::And => {
-                    let right = self.expression_precedence(precedence + 1)?;
-                    Expr {
-                        node: self.node(left.node.span, right.node.span),
-                        kind: ExprKind::And {
-                            left: Box::new(left),
-                            right: Box::new(right),
-                        },
-                    }
-                }
-                _ => {
-                    let right = self.expression_precedence(precedence + 1)?;
-                    Expr {
-                        node: self.node(left.node.span, right.node.span),
-                        kind: ExprKind::Binary {
-                            left: Box::new(left),
-                            right: Box::new(right),
-                            operator: binop,
-                        },
-                    }
-                }
-            };
+
+            let right = self.expression_precedence(precedence + 1)?;
+            left = Expr {
+                node: self.node(left.node.span, right.node.span),
+                kind: ExprKind::Binary {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                    operator: binop,
+                },
+            }
         }
         Ok(left)
     }
@@ -244,7 +219,7 @@ impl<'src> Parser<'src> {
             TokenKind::GreaterEqual => BinOpKind::Ge,
             TokenKind::And => BinOpKind::And,
             TokenKind::Or => BinOpKind::Or,
-            _ => return self.error(format!("Invalid binary operator {op:?}")),
+            _ => return self.parse_error(format!("Invalid binary operator {op:?}")),
         };
         self.advance();
         Ok(BinOp {
@@ -275,7 +250,7 @@ impl<'src> Parser<'src> {
             | TokenKind::False
             | TokenKind::True => self.literal(),
             TokenKind::Identifier => self.variable(),
-            other_kind => self.error(format!("Expected expression, got {other_kind:?}")),
+            other_kind => self.parse_error(format!("Expected expression, got {other_kind:?}")),
         }
     }
 
@@ -310,7 +285,7 @@ impl<'src> Parser<'src> {
                 })?;
                 ExprKind::Literal(LiteralKind::Float(value))
             }
-            _ => return self.error(format!("Expected literal, got {:?}", token.kind)),
+            _ => return self.parse_error(format!("Expected literal, got {:?}", token.kind)),
         };
         self.advance();
         Ok(Expr {
@@ -461,11 +436,10 @@ impl<'src> Parser<'src> {
             return Ok(token);
         }
 
-        self.error(msg(token))
+        self.parse_error(msg(token))
     }
 
-    // TODO: Extract from impl and rename to parse_error
-    fn error<T>(&self, msg: impl Into<String>) -> Result<T> {
+    fn parse_error<T>(&self, msg: impl Into<String>) -> Result<T> {
         Err(ParseError {
             msg: msg.into(),
             span: self.token.span,

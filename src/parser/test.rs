@@ -114,12 +114,6 @@ impl SExpr for Expr {
                 left.s_expr(),
                 right.s_expr()
             ),
-            ExprKind::Or { left, right } => {
-                format!("(or {} {})", left.s_expr(), right.s_expr())
-            }
-            ExprKind::And { left, right } => {
-                format!("(and {} {})", left.s_expr(), right.s_expr())
-            }
             ExprKind::Not { right } => format!("(not {})", right.s_expr()),
 
             ExprKind::Call { callee, args } => {

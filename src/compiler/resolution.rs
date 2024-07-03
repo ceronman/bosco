@@ -214,9 +214,7 @@ impl SymbolTable {
         match &expr.kind {
             ExprKind::Literal(_) => {}
             ExprKind::Variable(ident) => self.resolve_var(ident)?,
-            ExprKind::Binary { left, right, .. }
-            | ExprKind::Or { left, right, .. }
-            | ExprKind::And { left, right, .. } => {
+            ExprKind::Binary { left, right, .. } => {
                 self.resolve_expression(left)?;
                 self.resolve_expression(right)?;
             }

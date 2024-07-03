@@ -94,16 +94,10 @@ impl Compiler {
             } => {
                 let left_ty = self.type_check_expr(left)?;
                 let right_ty = self.type_check_expr(right)?;
+
                 if left_ty != right_ty {
                     return compile_error(
                         format!("Type Error: operator {:?} has incompatible types {left_ty:?} and {right_ty:?}", operator.kind),
-                        expr.node.span,
-                    );
-                }
-
-                if operator.kind == BinOpKind::Mod && left_ty == Ty::Float {
-                    return compile_error(
-                        "Type Error: '%' operator doesn't work on floats",
                         expr.node.span,
                     );
                 }
@@ -115,20 +109,29 @@ impl Compiler {
                     | BinOpKind::Ne
                     | BinOpKind::Ge
                     | BinOpKind::Gt => Ty::Bool,
+                    BinOpKind::And | BinOpKind::Or => {
+                        if left_ty != Ty::Bool {
+                            return compile_error(
+                                "Type Error: operand should be 'bool'",
+                                left.node.span,
+                            );
+                        }
+                        if right_ty != Ty::Bool {
+                            return compile_error(
+                                "Type Error: operand should be 'bool'",
+                                right.node.span,
+                            );
+                        }
+                        Ty::Bool
+                    }
+                    BinOpKind::Mod if left_ty == Ty::Float => {
+                        return compile_error(
+                            "Type Error: '%' operator doesn't work on floats",
+                            expr.node.span,
+                        );
+                    }
                     _ => left_ty,
                 }
-            }
-            ExprKind::Or { left, right } | ExprKind::And { left, right } => {
-                let left_ty = self.type_check_expr(left)?;
-
-                if left_ty != Ty::Bool {
-                    return compile_error("Type Error: operand should be 'bool'", left.node.span);
-                }
-                let right_ty = self.type_check_expr(right)?;
-                if right_ty != Ty::Bool {
-                    return compile_error("Type Error: operand should be 'bool'", right.node.span);
-                }
-                Ty::Bool
             }
             ExprKind::Not { right } => {
                 let right_ty = self.type_check_expr(right)?;
