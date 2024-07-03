@@ -1,10 +1,26 @@
 use anyhow::Result;
 
-use crate::ast::{BinOpKind, Expr, ExprKind, Function, LiteralKind, Stmt, StmtKind};
+use crate::ast::{
+    BinOpKind, Expr, ExprKind, Function, Item, ItemKind, LiteralKind, Module, Stmt, StmtKind,
+};
 use crate::compiler::{compile_error, Compiler, Ty};
 
 impl Compiler {
-    pub(super) fn type_check_function(&mut self, function: &Function) -> Result<()> {
+    pub(super) fn type_check(&mut self, module: &Module) -> Result<()> {
+        for item in &module.items {
+            self.type_check_item(item)?;
+        }
+        Ok(())
+    }
+
+    fn type_check_item(&mut self, item: &Item) -> Result<()> {
+        match &item.kind {
+            ItemKind::Function(f) => self.type_check_function(f)?,
+        }
+        Ok(())
+    }
+
+    fn type_check_function(&mut self, function: &Function) -> Result<()> {
         self.type_check_stmt(&function.body)?;
         Ok(())
     }

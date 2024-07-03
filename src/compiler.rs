@@ -124,9 +124,6 @@ impl Compiler {
         self.types.function(params, returns.iter().copied());
         self.functions.function(type_index);
 
-        // Type check
-        self.type_check_function(function)?; // TODO: Move outside
-
         let Some(signature) = self.symbol_table.lookup_function(&function.name) else {
             return compile_error(
                 format!("Unresolved function {}", function.name.symbol),
@@ -171,49 +168,10 @@ impl Compiler {
             }
             StmtKind::ExprStmt(expr) => {
                 self.expression(func, expr)?;
+                // TODO: Fix case where expression leaves stuff on the stack
                 // func.instruction(&Instruction::Drop);
             }
 
-            // StmtKind::Call { callee, args, .. } => {
-            //     let callee_name = callee.span.as_str(self.source);
-            //     let Some(&callee) = self.fn_indices.get(callee_name) else {
-            //         return compile_error(
-            //             format!("Function '{callee_name}' not found!"),
-            //             stmt.node.span,
-            //         );
-            //     };
-            //
-            //     match callee_name {
-            //         "print" => {
-            //             // NOTE Args are already checked in type check
-            //             self.expression(func, &args[0])?; // Needed to add the string value
-            //             if let ExprKind::Literal(LiteralKind::String { token, .. }) = args[0].kind {
-            //                 let Some(was_str) = self.strings.get(&token) else {
-            //                     return compile_error("String constant not found", token.span);
-            //                 };
-            //                 func.instruction(&Instruction::I32Const(was_str.offset as i32));
-            //                 func.instruction(&Instruction::I32Const(was_str.len as i32));
-            //                 func.instruction(&Instruction::Call(callee));
-            //             } else {
-            //                 return compile_error(
-            //                     "Incorrect arguments for 'print'!",
-            //                     stmt.node.span,
-            //                 );
-            //             }
-            //         }
-            //         "print_int" | "print_float" => {
-            //             // NOTE Args are already checked in type check
-            //             self.expression(func, &args[0])?;
-            //             func.instruction(&Instruction::Call(callee));
-            //         }
-            //         _ => {
-            //             return compile_error(
-            //                 format!("Unknown function '{callee_name}'"),
-            //                 stmt.node.span,
-            //             )
-            //         }
-            //     }
-            // }
             StmtKind::Declaration { name, value, .. } => {
                 if let Some(value) = value {
                     let local_var = self.symbol_table.lookup_var(name)?;
@@ -482,6 +440,7 @@ impl Compiler {
         self.import_functions();
         self.import_memory();
         self.symbol_table.resolve(module)?;
+        self.type_check(module)?;
         self.module(module)?;
         self.encode_wasm()
     }
