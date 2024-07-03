@@ -3,8 +3,7 @@ use std::str::Chars;
 #[cfg(test)]
 mod test;
 
-// TODO: Re-think the need for Hash
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum TokenKind {
     Plus,
     Minus,
@@ -60,7 +59,7 @@ pub enum TokenKind {
     Eof,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug)]
 pub struct Span(pub usize, pub usize);
 
 impl Span {
@@ -69,8 +68,7 @@ impl Span {
     }
 }
 
-// TODO: Re-think the need for Hash
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug)]
 pub struct Token {
     pub kind: TokenKind,
     pub span: Span,

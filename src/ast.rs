@@ -25,7 +25,6 @@ impl From<&str> for Symbol {
     }
 }
 
-// TODO: Implement inheritance like using Node<T> and Deref, AsRef, etc
 #[derive(Copy, Clone, Debug)]
 pub struct Node {
     pub id: NodeId,
