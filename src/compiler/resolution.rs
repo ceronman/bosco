@@ -1,6 +1,6 @@
-use std::collections::{HashMap, VecDeque};
-
 use anyhow::Result;
+use std::collections::{HashMap, VecDeque};
+use std::rc::Rc;
 
 use crate::ast::{
     Expr, ExprKind, Function, Identifier, Item, ItemKind, Module, NodeId, Param, Stmt, StmtKind,
@@ -28,7 +28,7 @@ pub(super) struct SymbolTable {
     environments: VecDeque<HashMap<Symbol, LocalVar>>, // TODO: Use interned strings instead
     local_counter: Counter,
     locals: HashMap<NodeId, LocalVar>, // TODO: Maybe move ty in local var to the type checker?
-    functions: HashMap<Symbol, FnSignature>, // TODO: Figure out a better thing than String here.
+    functions: HashMap<Symbol, Rc<FnSignature>>, // TODO: Figure out a better thing than String here.
     function_counter: Counter,
     function_locals: Vec<LocalVar>,
 }
@@ -87,8 +87,8 @@ impl SymbolTable {
         Ok(local)
     }
 
-    pub(super) fn lookup_function(&self, name: &Identifier) -> Option<FnSignature> {
-        self.functions.get(&name.symbol).map(|s| (*s).clone()) // TODO: Clone?
+    pub(super) fn lookup_function(&self, name: &Identifier) -> Option<Rc<FnSignature>> {
+        self.functions.get(&name.symbol).cloned()
     }
 
     fn begin_scope(&mut self) {
@@ -119,12 +119,12 @@ impl SymbolTable {
         // TODO: Check duplicate functions!
         self.functions.insert(
             name,
-            FnSignature {
+            Rc::new(FnSignature {
                 params: params.into(),
                 return_ty,
                 index: self.function_counter.next(),
                 local_vars: vec![],
-            },
+            }),
         );
     }
 
@@ -157,7 +157,7 @@ impl SymbolTable {
             local_vars: self.function_locals.iter().map(|l| l.ty).collect(),
         };
         // TODO: Check duplicate functions!
-        self.functions.insert(name, signature);
+        self.functions.insert(name, Rc::new(signature));
 
         Ok(())
     }

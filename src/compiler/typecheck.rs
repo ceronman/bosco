@@ -159,46 +159,43 @@ impl Compiler {
             }
 
             ExprKind::Call { callee, args } => {
-                let signature = match &callee.kind {
-                    ExprKind::Variable(ident) => {
-                        // TODO: hack!
-                        if ident.symbol.as_str() == "print" {
-                            if args.len() != 1 {
-                                return compile_error(
-                                    "The 'print' function requires a single argument",
-                                    expr.node.span,
-                                );
-                            }
-                            return Ok(Ty::Void);
+                if let ExprKind::Variable(ident) = &callee.kind {
+                    // TODO: hack!
+                    if ident.symbol.as_str() == "print" {
+                        if args.len() != 1 {
+                            return compile_error(
+                                "The 'print' function requires a single argument",
+                                expr.node.span,
+                            );
                         }
+                        return Ok(Ty::Void);
+                    }
 
-                        // TODO: This dance is duplicated
-                        let Some(s) = self.symbol_table.lookup_function(ident) else {
-                            return compile_error("Unresolved function", callee.node.span);
-                        };
-                        s
-                    }
-                    _ => {
+                    // TODO: This dance is duplicated
+                    let Some(sig) = self.symbol_table.lookup_function(ident) else {
+                        return compile_error("Unresolved function", callee.node.span);
+                    };
+
+                    if args.len() != sig.params.len() {
                         return compile_error(
-                            "First class functions not supported",
-                            callee.node.span,
-                        )
+                            "Function called with incorrect number of arguments",
+                            expr.node.span,
+                        );
                     }
-                };
-                if args.len() != signature.params.len() {
-                    return compile_error(
-                        "Function called with incorrect number of arguments",
-                        expr.node.span,
-                    );
-                }
-                for (i, arg) in args.iter().enumerate() {
-                    let arg_ty = self.type_check_expr(arg)?;
-                    let param_ty = signature.params[i];
-                    if arg_ty != param_ty {
-                        return compile_error("Type Error: argument type mismatch", arg.node.span);
+                    for (i, arg) in args.iter().enumerate() {
+                        let arg_ty = self.type_check_expr(arg)?;
+                        let param_ty = sig.params[i];
+                        if arg_ty != param_ty {
+                            return compile_error(
+                                "Type Error: argument type mismatch",
+                                arg.node.span,
+                            );
+                        }
                     }
+                    sig.return_ty
+                } else {
+                    return compile_error("First class functions not supported", callee.node.span);
                 }
-                signature.return_ty
             }
         };
         self.expression_types.insert(expr.node.id, ty);
