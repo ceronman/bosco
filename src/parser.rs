@@ -4,7 +4,7 @@ mod test;
 use crate::ast::StmtKind::ExprStmt;
 use crate::ast::{
     BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module,
-    Node, NodeId, Param, Stmt, StmtKind, Symbol, Ty,
+    Node, NodeId, Param, Stmt, StmtKind, Symbol, Ty, UnOp, UnOpKind,
 };
 use crate::lexer::{Lexer, Span, Token, TokenKind};
 use anyhow::Result;
@@ -135,20 +135,21 @@ impl<'src> Parser<'src> {
     fn expression_precedence(&mut self, min_precedence: u8) -> Result<Expr> {
         let mut prefix = match self.token.kind {
             TokenKind::LParen => self.grouping()?,
-            TokenKind::Not => self.logical_not()?,
             TokenKind::Str
             | TokenKind::Int
             | TokenKind::Float
             | TokenKind::False
             | TokenKind::True => self.literal()?,
             TokenKind::Identifier => self.variable()?,
+            TokenKind::Not | TokenKind::Minus => self.unary_expr()?,
+
             other_kind => {
                 return self.parse_error(format!("Expected expression, got {other_kind:?}"))
-            },
+            }
         };
 
         loop {
-            let Ok(precedence) = self.operator_precedence() else {
+            let Some(precedence) = self.infix_precedence() else {
                 break;
             };
             if precedence < min_precedence {
@@ -157,10 +158,10 @@ impl<'src> Parser<'src> {
 
             prefix = match self.token.kind {
                 TokenKind::LParen => self.call(prefix)?,
-                _ => self.binary_expr(prefix, precedence)?
+                _ => self.binary_expr(prefix, precedence)?,
             };
         }
-        
+
         Ok(prefix)
     }
 
@@ -171,13 +172,16 @@ impl<'src> Parser<'src> {
         Ok(inner)
     }
 
-    fn logical_not(&mut self) -> Result<Expr> {
-        let precedence = self.operator_precedence()?;
-        self.expect(TokenKind::Not)?;
+    fn unary_expr(&mut self) -> Result<Expr> {
+        let Some(precedence) = self.prefix_precedence() else {
+            return self.parse_error("Unknown infix precedence");
+        };
+        let operator = self.unary_operator()?;
         let right = self.expression_precedence(precedence)?;
         Ok(Expr {
-            node: self.node(self.token.span, right.node.span),
-            kind: ExprKind::Not {
+            node: self.node(operator.node.span, right.node.span),
+            kind: ExprKind::Unary {
+                operator,
                 right: Box::new(right),
             },
         })
@@ -207,14 +211,14 @@ impl<'src> Parser<'src> {
     }
 
     fn binary_expr(&mut self, prefix: Expr, precedence: u8) -> Result<Expr> {
-        let binop = self.binary_operator()?;
+        let operator = self.binary_operator()?;
         let right = self.expression_precedence(precedence + 1)?;
         Ok(Expr {
             node: self.node(prefix.node.span, right.node.span),
             kind: ExprKind::Binary {
                 left: Box::new(prefix),
                 right: Box::new(right),
-                operator: binop,
+                operator,
             },
         })
     }
@@ -244,23 +248,43 @@ impl<'src> Parser<'src> {
         })
     }
 
+    fn unary_operator(&mut self) -> Result<UnOp> {
+        let op = self.token;
+        let kind = match op.kind {
+            TokenKind::Minus => UnOpKind::Neg,
+            TokenKind::Not => UnOpKind::Not,
+            _ => return self.parse_error(format!("Invalid unary operator {op:?}")),
+        };
+        self.advance();
+        Ok(UnOp {
+            node: self.node(op.span, op.span),
+            kind,
+        })
+    }
+
     #[rustfmt::skip]
-    fn operator_precedence(&self) -> Result<u8> {
+    fn prefix_precedence(&self) -> Option<u8> {
         use TokenKind::*;
-        let operator = self.token.kind;
-        match operator {
-            Not | LParen            => Ok(7),
-            Star | Slash | Percent  => Ok(6),
-            Plus | Minus            => Ok(5),
-            Greater | GreaterEqual 
-            | Less | LessEqual      => Ok(4),
-            EqualEqual | BangEqual  => Ok(3),
-            And                     => Ok(2),
-            Or                      => Ok(1),
-            
-            _ => {
-                return self.parse_error(format!("Unknown operator {operator:?}"))
-            }
+        match self.token.kind {
+            Not | Minus             => Some(7),
+            _                       => None
+        }
+    }
+
+    #[rustfmt::skip]
+    fn infix_precedence(&self) -> Option<u8> {
+        use TokenKind::*;
+        match self.token.kind {
+            LParen                  => Some(7),
+            Star | Slash | Percent  => Some(6),
+            Plus | Minus            => Some(5),
+            Greater | GreaterEqual
+            | Less | LessEqual      => Some(4),
+            EqualEqual | BangEqual  => Some(3),
+            And                     => Some(2),
+            Or                      => Some(1),
+
+            _                       => None
         }
     }
 

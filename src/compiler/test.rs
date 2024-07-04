@@ -167,12 +167,18 @@ fn test_expressions() {
                 print_int(d)
                 let e int = (a + b) * (c - d)
                 print_int(e)
+                let f int = -1
+                print_int(f)
+                let g int = -1 + (a + b)
+                print_int(g)
             }
         "#,
         r#"
             9
             2
             21
+            -1
+            2
         "#,
     )
 }

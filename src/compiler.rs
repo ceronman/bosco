@@ -10,7 +10,7 @@ use wasm_encoder::{
 use crate::ast;
 use crate::ast::{
     BinOpKind, Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind,
-    Symbol,
+    Symbol, UnOpKind,
 };
 use crate::compiler::resolution::SymbolTable;
 use crate::lexer::Span;
@@ -326,14 +326,46 @@ impl Compiler {
                 };
             }
 
-            ExprKind::Not { right } => {
-                self.expression(func, right)?;
-                func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
-                func.instruction(&Instruction::I32Const(0));
-                func.instruction(&Instruction::Else);
-                func.instruction(&Instruction::I32Const(1));
-                func.instruction(&Instruction::End);
-            }
+            ExprKind::Unary { operator, right } => match operator.kind {
+                UnOpKind::Not => {
+                    self.expression(func, right)?;
+                    func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+                    func.instruction(&Instruction::I32Const(0));
+                    func.instruction(&Instruction::Else);
+                    func.instruction(&Instruction::I32Const(1));
+                    func.instruction(&Instruction::End);
+                }
+                UnOpKind::Neg => {
+                    let Some(&ty) = self.expression_types.get(&right.node.id) else {
+                        return compile_error(
+                            "Fatal: Not type found for expression",
+                            right.node.span,
+                        );
+                    };
+
+                    match ty {
+                        Ty::Float => {
+                            self.expression(func, right)?;
+                            func.instruction(&Instruction::F64Neg);
+                        }
+                        Ty::Int => {
+                            func.instruction(&Instruction::I32Const(0));
+                            self.expression(func, right)?;
+                            func.instruction(&Instruction::I32Sub);
+                        }
+
+                        _ => {
+                            return compile_error(
+                                format!(
+                                    "Operator '{:?}' is not supported for type {ty:?}",
+                                    operator.kind
+                                ),
+                                operator.node.span,
+                            )
+                        }
+                    }
+                }
+            },
             ExprKind::Variable(ident) => {
                 let local_var = self.symbol_table.lookup_var(ident)?;
                 func.instruction(&Instruction::LocalGet(local_var.index));

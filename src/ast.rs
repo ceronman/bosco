@@ -108,12 +108,13 @@ pub struct Expr {
 pub enum ExprKind {
     Literal(LiteralKind),
     Variable(Identifier),
-    Binary {
-        left: Box<Expr>,
+    Unary {
+        operator: UnOp,
         right: Box<Expr>,
-        operator: BinOp,
     },
-    Not {
+    Binary {
+        operator: BinOp,
+        left: Box<Expr>,
         right: Box<Expr>,
     },
     Call {
@@ -143,6 +144,18 @@ pub enum BinOpKind {
     Ge,
     And,
     Or,
+}
+
+#[derive(Debug)]
+pub struct UnOp {
+    pub node: Node,
+    pub kind: UnOpKind,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum UnOpKind {
+    Neg,
+    Not,
 }
 
 #[derive(Debug)]

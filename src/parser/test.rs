@@ -5,7 +5,7 @@ use ariadne::{Label, Report, ReportKind, Source};
 
 use crate::ast::{
     BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module,
-    Param, Stmt, StmtKind,
+    Param, Stmt, StmtKind, UnOp, UnOpKind,
 };
 use crate::parser::{parse, ParseError};
 
@@ -114,7 +114,9 @@ impl SExpr for Expr {
                 left.s_expr(),
                 right.s_expr()
             ),
-            ExprKind::Not { right } => format!("(not {})", right.s_expr()),
+            ExprKind::Unary { operator, right } => {
+                format!("({} {})", operator.s_expr(), right.s_expr())
+            }
 
             ExprKind::Call { callee, args } => {
                 format!("(call {} {})", callee.s_expr(), args.s_expr())
@@ -139,6 +141,16 @@ impl SExpr for BinOp {
             BinOpKind::Ge => ">=",
             BinOpKind::And => "and",
             BinOpKind::Or => "or",
+        }
+        .into()
+    }
+}
+
+impl SExpr for UnOp {
+    fn s_expr(&self) -> String {
+        match self.kind {
+            UnOpKind::Not => "not",
+            UnOpKind::Neg => "-",
         }
         .into()
     }
@@ -409,6 +421,16 @@ fn test_assignment() {
 }
 
 #[test]
+fn test_unary_expression() {
+    test_main! {
+        r#"
+            a = -4
+        "#,
+        (= a (- 4))
+    }
+}
+
+#[test]
 fn test_assignment_binary_expression() {
     test_main! {
         r#"
@@ -433,6 +455,14 @@ fn test_precedence() {
     test_main! {
         "x = a + b * c + d",
         (= x (+ (+ a (* b c)) d))
+    }
+}
+
+#[test]
+fn test_unary_precedence() {
+    test_main! {
+        "x = -c + (a + b)",
+        (= x (+ (- c) (+ a b)))
     }
 }
 

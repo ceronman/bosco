@@ -2,6 +2,7 @@ use anyhow::Result;
 
 use crate::ast::{
     BinOpKind, Expr, ExprKind, Function, Item, ItemKind, LiteralKind, Module, Stmt, StmtKind,
+    UnOpKind,
 };
 use crate::compiler::{compile_error, Compiler, Ty};
 
@@ -149,12 +150,12 @@ impl Compiler {
                     _ => left_ty,
                 }
             }
-            ExprKind::Not { right } => {
+            ExprKind::Unary { operator, right } => {
                 let right_ty = self.type_check_expr(right)?;
-                if right_ty != Ty::Bool {
+                if operator.kind == UnOpKind::Not && right_ty != Ty::Bool {
                     return compile_error("Type Error: operand should be 'bool'", right.node.span);
                 }
-                Ty::Bool
+                right_ty
             }
 
             ExprKind::Call { callee, args } => {

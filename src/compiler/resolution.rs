@@ -218,7 +218,7 @@ impl SymbolTable {
                 self.resolve_expression(left)?;
                 self.resolve_expression(right)?;
             }
-            ExprKind::Not { right } => self.resolve_expression(right)?,
+            ExprKind::Unary { right, .. } => self.resolve_expression(right)?,
 
             ExprKind::Call {
                 callee: _callee,
