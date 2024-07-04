@@ -133,77 +133,93 @@ impl<'src> Parser<'src> {
     }
 
     fn expression_precedence(&mut self, min_precedence: u8) -> Result<Expr> {
-        // TODO: Generalize?
-        let mut left = match self.token.kind {
-            TokenKind::LParen => {
-                self.advance();
-                let inner = self.expression()?; // TODO: Prattify, test nesting
-                self.expect(TokenKind::RParen)?;
-                inner
-            }
-            TokenKind::Not => {
-                self.advance();
-                let right = self.expression_precedence(7)?;
-                Expr {
-                    node: self.node(self.token.span, right.node.span),
-                    kind: ExprKind::Not {
-                        right: Box::new(right),
-                    },
-                }
-            }
-            _ => self.expression_atom()?,
+        let mut prefix = match self.token.kind {
+            TokenKind::LParen => self.grouping()?,
+            TokenKind::Not => self.logical_not()?,
+            TokenKind::Str
+            | TokenKind::Int
+            | TokenKind::Float
+            | TokenKind::False
+            | TokenKind::True => self.literal()?,
+            TokenKind::Identifier => self.variable()?,
+            other_kind => {
+                return self.parse_error(format!("Expected expression, got {other_kind:?}"))
+            },
         };
 
         loop {
-            let operator = self.token;
-            let Some(precedence) = self.binary_precedence(operator.kind) else {
+            let Ok(precedence) = self.operator_precedence() else {
                 break;
             };
             if precedence < min_precedence {
                 break;
             }
 
-            // TODO: Ugly, cleanup!
-            if let TokenKind::LParen = operator.kind {
-                self.advance();
-                let mut args = Vec::new();
-                if self.token.kind != TokenKind::RParen {
-                    loop {
-                        self.maybe_eol();
-                        args.push(self.expression()?);
-
-                        if !self.eat(TokenKind::Comma) {
-                            break;
-                        }
-                    }
-                }
-                let rparen = self.expect(TokenKind::RParen)?;
-                left = Expr {
-                    node: self.node(left.node.span, rparen.span),
-                    kind: ExprKind::Call {
-                        callee: Box::new(left),
-                        args,
-                    },
-                };
-                continue;
-            }
-
-            let binop = self.binop()?;
-
-            let right = self.expression_precedence(precedence + 1)?;
-            left = Expr {
-                node: self.node(left.node.span, right.node.span),
-                kind: ExprKind::Binary {
-                    left: Box::new(left),
-                    right: Box::new(right),
-                    operator: binop,
-                },
-            }
+            prefix = match self.token.kind {
+                TokenKind::LParen => self.call(prefix)?,
+                _ => self.binary_expr(prefix, precedence)?
+            };
         }
-        Ok(left)
+        
+        Ok(prefix)
     }
 
-    fn binop(&mut self) -> Result<BinOp> {
+    fn grouping(&mut self) -> Result<Expr> {
+        self.expect(TokenKind::LParen)?;
+        let inner = self.expression()?;
+        self.expect(TokenKind::RParen)?;
+        Ok(inner)
+    }
+
+    fn logical_not(&mut self) -> Result<Expr> {
+        let precedence = self.operator_precedence()?;
+        self.expect(TokenKind::Not)?;
+        let right = self.expression_precedence(precedence)?;
+        Ok(Expr {
+            node: self.node(self.token.span, right.node.span),
+            kind: ExprKind::Not {
+                right: Box::new(right),
+            },
+        })
+    }
+
+    fn call(&mut self, prefix: Expr) -> Result<Expr> {
+        self.expect(TokenKind::LParen)?;
+        let mut args = Vec::new();
+        if self.token.kind != TokenKind::RParen {
+            loop {
+                self.maybe_eol();
+                args.push(self.expression()?);
+
+                if !self.eat(TokenKind::Comma) {
+                    break;
+                }
+            }
+        }
+        let rparen = self.expect(TokenKind::RParen)?;
+        Ok(Expr {
+            node: self.node(prefix.node.span, rparen.span),
+            kind: ExprKind::Call {
+                callee: Box::new(prefix),
+                args,
+            },
+        })
+    }
+
+    fn binary_expr(&mut self, prefix: Expr, precedence: u8) -> Result<Expr> {
+        let binop = self.binary_operator()?;
+        let right = self.expression_precedence(precedence + 1)?;
+        Ok(Expr {
+            node: self.node(prefix.node.span, right.node.span),
+            kind: ExprKind::Binary {
+                left: Box::new(prefix),
+                right: Box::new(right),
+                operator: binop,
+            },
+        })
+    }
+
+    fn binary_operator(&mut self) -> Result<BinOp> {
         let op = self.token;
         let kind = match op.kind {
             TokenKind::Plus => BinOpKind::Add,
@@ -228,29 +244,23 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn binary_precedence(&self, operator: TokenKind) -> Option<u8> {
+    #[rustfmt::skip]
+    fn operator_precedence(&self) -> Result<u8> {
         use TokenKind::*;
+        let operator = self.token.kind;
         match operator {
-            Or => Some(1),
-            And => Some(2),
-            EqualEqual | BangEqual => Some(3),
-            Greater | GreaterEqual | Less | LessEqual => Some(4),
-            Plus | Minus => Some(5),
-            Star | Slash | Percent => Some(6),
-            LParen => Some(7),
-            _ => None,
-        }
-    }
-
-    fn expression_atom(&mut self) -> Result<Expr> {
-        match self.token.kind {
-            TokenKind::Str
-            | TokenKind::Int
-            | TokenKind::Float
-            | TokenKind::False
-            | TokenKind::True => self.literal(),
-            TokenKind::Identifier => self.variable(),
-            other_kind => self.parse_error(format!("Expected expression, got {other_kind:?}")),
+            Not | LParen            => Ok(7),
+            Star | Slash | Percent  => Ok(6),
+            Plus | Minus            => Ok(5),
+            Greater | GreaterEqual 
+            | Less | LessEqual      => Ok(4),
+            EqualEqual | BangEqual  => Ok(3),
+            And                     => Ok(2),
+            Or                      => Ok(1),
+            
+            _ => {
+                return self.parse_error(format!("Unknown operator {operator:?}"))
+            }
         }
     }
 
