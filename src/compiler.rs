@@ -55,17 +55,6 @@ impl Ty {
         }
     }
 
-    fn from_wasm(wasm_ty: &ValType) -> Ty {
-        match wasm_ty {
-            ValType::I32 => Ty::Int,
-            ValType::I64 => todo!(),
-            ValType::F32 => todo!(),
-            ValType::F64 => Ty::Float,
-            ValType::V128 => todo!(),
-            ValType::Ref(_) => todo!(),
-        }
-    }
-
     fn as_wasm(&self) -> ValType {
         match self {
             Ty::Void => todo!(),
@@ -415,32 +404,30 @@ impl Compiler {
     }
 
     fn import_functions(&mut self) {
-        self.import_function("js", "print", &[ValType::I32, ValType::I32], &[]);
-        self.import_function("js", "print_int", &[ValType::I32], &[]);
-        self.import_function("js", "print_float", &[ValType::F64], &[]);
+        self.import_function("js", "print", &[Ty::Int, Ty::Int], Ty::Void);
+        self.import_function("js", "print_int", &[Ty::Int], Ty::Void);
+        self.import_function("js", "print_float", &[Ty::Float], Ty::Void);
     }
 
     fn import_function(
         &mut self,
         module: &'static str,
         name: &'static str,
-        params: &[ValType],
-        results: &[ValType],
+        params: &[Ty],
+        return_ty: Ty,
     ) {
         let type_idx = self.types.len();
-        self.types
-            .function(params.iter().copied(), results.iter().copied());
+        let wasm_params = params.iter().map(Ty::as_wasm);
+        let returns: &[ValType] = if return_ty == Ty::Void {
+            &[]
+        } else {
+            &[return_ty.as_wasm()]
+        };
+        self.types.function(wasm_params, returns.iter().copied());
         self.imports
             .import(module, name, EntityType::Function(type_idx));
-        self.symbol_table.import_function(
-            Symbol::from(name),
-            params.iter().map(Ty::from_wasm).collect(),
-            match results.len() {
-                0 => Ty::Void,
-                1 => Ty::from_wasm(&results[0]),
-                _ => todo!(),
-            },
-        );
+        self.symbol_table
+            .import_function(Symbol::from(name), params, return_ty);
     }
 
     fn import_memory(&mut self) {

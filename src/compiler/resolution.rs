@@ -115,12 +115,12 @@ impl SymbolTable {
         Ok(())
     }
 
-    pub(super) fn import_function(&mut self, name: Symbol, params: Vec<Ty>, return_ty: Ty) {
+    pub(super) fn import_function(&mut self, name: Symbol, params: &[Ty], return_ty: Ty) {
         // TODO: Check duplicate functions!
         self.functions.insert(
             name,
             FnSignature {
-                params,
+                params: params.into(),
                 return_ty,
                 index: self.function_counter.next(),
                 local_vars: vec![],
