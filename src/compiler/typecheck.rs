@@ -98,8 +98,8 @@ impl Compiler {
         let ty = match &expr.kind {
             ExprKind::Literal(LiteralKind::Int(_)) => Ty::Int,
             ExprKind::Literal(LiteralKind::Float(_)) => Ty::Float,
-            ExprKind::Literal(LiteralKind::String { .. }) => Ty::Int, // TODO: Fix me!
-            ExprKind::Literal(LiteralKind::Bool(_)) => Ty::Bool,      // TODO: Fix me!
+            ExprKind::Literal(LiteralKind::String { .. }) => Ty::Int, // TODO: Add String type
+            ExprKind::Literal(LiteralKind::Bool(_)) => Ty::Bool,
             ExprKind::Variable(ident) => {
                 let local_var = self.symbol_table.lookup_var(ident)?;
                 local_var.ty

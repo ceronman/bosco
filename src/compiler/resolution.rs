@@ -14,21 +14,19 @@ pub struct LocalVar {
     pub ty: Ty,
 }
 
-// TODO: Maybe store Function node instead using Rc<Function> ?
 #[derive(Debug, Clone)]
 pub struct FnSignature {
     pub params: Vec<Ty>,
     pub return_ty: Ty,
     pub index: u32,
-    pub local_vars: Vec<Ty>, // TODO: Duplicate in SymbolTable
+    pub locals: Vec<Ty>,
 }
 
 #[derive(Default)]
 pub(super) struct SymbolTable {
-    environments: VecDeque<HashMap<Symbol, LocalVar>>, // TODO: Use interned strings instead
-    local_counter: Counter,
-    locals: HashMap<NodeId, LocalVar>, // TODO: Maybe move ty in local var to the type checker?
-    functions: HashMap<Symbol, Rc<FnSignature>>, // TODO: Figure out a better thing than String here.
+    environments: VecDeque<HashMap<Symbol, LocalVar>>,
+    locals: HashMap<NodeId, LocalVar>,
+    functions: HashMap<Symbol, Rc<FnSignature>>,
     function_counter: Counter,
     function_locals: Vec<LocalVar>,
 }
@@ -55,7 +53,7 @@ impl SymbolTable {
             );
         }
         let local_var = LocalVar {
-            index: self.local_counter.next(),
+            index: self.function_locals.len() as u32,
             ty,
         };
         env.insert(ident.symbol.clone(), local_var);
@@ -123,7 +121,7 @@ impl SymbolTable {
                 params: params.into(),
                 return_ty,
                 index: self.function_counter.next(),
-                local_vars: vec![],
+                locals: vec![],
             }),
         );
     }
@@ -131,7 +129,6 @@ impl SymbolTable {
     fn resolve_function(&mut self, function: &Function) -> Result<()> {
         //TODO: Ugly
         self.function_locals.clear();
-        self.local_counter.reset();
 
         self.begin_scope(); // TODO: Double because of blocks
         for Param { name, ty, .. } in &function.params {
@@ -141,21 +138,24 @@ impl SymbolTable {
         self.end_scope();
 
         let name = function.name.symbol.clone();
-        // FIXME: Unwraps!
-        let signature = FnSignature {
-            params: function
-                .params
-                .iter()
-                .map(|p| Ty::from_ast(&p.ty).unwrap())
-                .collect(),
-            return_ty: function
-                .return_ty
-                .as_ref()
-                .map(|r| Ty::from_ast(r).unwrap())
-                .unwrap_or(Ty::Void),
-            index: self.function_counter.next(),
-            local_vars: self.function_locals.iter().map(|l| l.ty).collect(),
+
+        let mut params = Vec::new();
+        for p in &function.params {
+            params.push(Ty::from_ast(&p.ty)?);
+        }
+
+        let return_ty = match &function.return_ty {
+            Some(t) => Ty::from_ast(t)?,
+            None => Ty::Void,
         };
+
+        let signature = FnSignature {
+            params,
+            return_ty,
+            index: self.function_counter.next(),
+            locals: self.function_locals.iter().map(|l| l.ty).collect(),
+        };
+
         // TODO: Check duplicate functions!
         self.functions.insert(name, Rc::new(signature));
 

@@ -74,10 +74,6 @@ impl Counter {
         self.0 += 1;
         current
     }
-
-    fn reset(&mut self) {
-        self.0 = 0;
-    }
 }
 
 #[derive(Default)]
@@ -120,7 +116,7 @@ impl Compiler {
             );
         };
 
-        let locals = signature.local_vars.iter().map(|ty| (1, ty.as_wasm()));
+        let locals = signature.locals.iter().map(|ty| (1, ty.as_wasm()));
         let mut wasm_function = wasm_encoder::Function::new(locals);
         self.statement(&mut wasm_function, &function.body)?;
         wasm_function.instruction(&Instruction::End);
