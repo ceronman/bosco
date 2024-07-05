@@ -130,7 +130,7 @@ impl SymbolTable {
         //TODO: Ugly
         self.function_locals.clear();
 
-        self.begin_scope(); // TODO: Double because of blocks
+        self.begin_scope();
         for Param { name, ty, .. } in &function.params {
             self.declare(name, Ty::from_ast(ty)?)?;
         }

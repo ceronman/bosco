@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use thiserror::Error;
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
@@ -55,12 +55,12 @@ impl Ty {
         }
     }
 
-    fn as_wasm(&self) -> ValType {
+    fn as_wasm(&self) -> Result<ValType> {
         match self {
-            Ty::Void => todo!(),
-            Ty::Int => ValType::I32,
-            Ty::Float => ValType::F64,
-            Ty::Bool => ValType::I32,
+            Ty::Void => bail!("Void type does not have a wasm equivalent"),
+            Ty::Int => Ok(ValType::I32),
+            Ty::Float => Ok(ValType::F64),
+            Ty::Bool => Ok(ValType::I32),
         }
     }
 }
@@ -98,10 +98,10 @@ impl Compiler {
         let mut params = Vec::new();
         for param in &function.params {
             let ty = Ty::from_ast(&param.ty)?;
-            params.push(ty.as_wasm())
+            params.push(ty.as_wasm()?)
         }
         let returns: &[ValType] = if let Some(return_ty) = &function.return_ty {
-            &[Ty::from_ast(return_ty)?.as_wasm()]
+            &[Ty::from_ast(return_ty)?.as_wasm()?]
         } else {
             &[]
         };
@@ -116,7 +116,13 @@ impl Compiler {
             );
         };
 
-        let locals = signature.locals.iter().map(|ty| (1, ty.as_wasm()));
+        let locals = signature
+            .locals
+            .iter()
+            .map(Ty::as_wasm)
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .map(|t| (1, t));
         let mut wasm_function = wasm_encoder::Function::new(locals);
         self.statement(&mut wasm_function, &function.body)?;
         wasm_function.instruction(&Instruction::End);
@@ -399,10 +405,10 @@ impl Compiler {
         Ok(())
     }
 
-    fn import_functions(&mut self) {
-        self.import_function("js", "print", &[Ty::Int, Ty::Int], Ty::Void);
-        self.import_function("js", "print_int", &[Ty::Int], Ty::Void);
-        self.import_function("js", "print_float", &[Ty::Float], Ty::Void);
+    fn import_functions(&mut self) -> Result<()> {
+        self.import_function("js", "print", &[Ty::Int, Ty::Int], Ty::Void)?;
+        self.import_function("js", "print_int", &[Ty::Int], Ty::Void)?;
+        self.import_function("js", "print_float", &[Ty::Float], Ty::Void)
     }
 
     fn import_function(
@@ -411,19 +417,20 @@ impl Compiler {
         name: &'static str,
         params: &[Ty],
         return_ty: Ty,
-    ) {
+    ) -> Result<()> {
         let type_idx = self.types.len();
-        let wasm_params = params.iter().map(Ty::as_wasm);
+        let wasm_params = params.iter().map(Ty::as_wasm).collect::<Result<Vec<_>>>()?;
         let returns: &[ValType] = if return_ty == Ty::Void {
             &[]
         } else {
-            &[return_ty.as_wasm()]
+            &[return_ty.as_wasm()?]
         };
         self.types.function(wasm_params, returns.iter().copied());
         self.imports
             .import(module, name, EntityType::Function(type_idx));
         self.symbol_table
             .import_function(Symbol::from(name), params, return_ty);
+        Ok(())
     }
 
     fn import_memory(&mut self) {
@@ -452,7 +459,7 @@ impl Compiler {
     }
 
     fn compile(&mut self, module: &Module) -> Result<Vec<u8>> {
-        self.import_functions();
+        self.import_functions()?;
         self.import_memory();
         self.symbol_table.resolve(module)?;
         self.type_check(module)?;
