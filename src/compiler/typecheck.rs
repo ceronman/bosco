@@ -171,10 +171,7 @@ impl Compiler {
                         return Ok(Ty::Void);
                     }
 
-                    // TODO: This dance is duplicated
-                    let Some(sig) = self.symbol_table.lookup_function(ident) else {
-                        return compile_error("Unresolved function", callee.node.span);
-                    };
+                    let sig = self.symbol_table.lookup_function(ident)?;
 
                     if args.len() != sig.params.len() {
                         return compile_error(

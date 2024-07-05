@@ -87,8 +87,14 @@ impl SymbolTable {
         Ok(local)
     }
 
-    pub(super) fn lookup_function(&self, name: &Identifier) -> Option<Rc<FnSignature>> {
-        self.functions.get(&name.symbol).cloned()
+    pub(super) fn lookup_function(&self, name: &Identifier) -> Result<Rc<FnSignature>> {
+        match self.functions.get(&name.symbol) {
+            Some(f) => Ok(Rc::clone(f)),
+            None => compile_error(
+                format!("Unknown function '{}'", name.symbol),
+                name.node.span,
+            ),
+        }
     }
 
     fn begin_scope(&mut self) {
@@ -132,9 +138,9 @@ impl SymbolTable {
             Entry::Occupied(e) => {
                 return compile_error(
                     format!("Imported function '{}' has already been declared", e.key()),
-                    Span(0, 0),
-                )
-            } // TODO: How to relate this with a span
+                    Span(0, 0), // TODO: Imported functions should be defined in source code eventually
+                );
+            }
             Entry::Vacant(v) => v.insert(signature),
         };
 

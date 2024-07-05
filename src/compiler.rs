@@ -109,12 +109,7 @@ impl Compiler {
         self.types.function(params, returns.iter().copied());
         self.functions.function(type_index);
 
-        let Some(signature) = self.symbol_table.lookup_function(&function.name) else {
-            return compile_error(
-                format!("Unresolved function {}", function.name.symbol),
-                function.name.node.span,
-            );
-        };
+        let signature = self.symbol_table.lookup_function(&function.name)?;
 
         let locals = signature
             .locals
@@ -373,12 +368,8 @@ impl Compiler {
                     }
                 };
 
-                let Some(signature) = self.symbol_table.lookup_function(name) else {
-                    return compile_error("Unresolved function", expr.node.span);
-                };
-
+                let signature = self.symbol_table.lookup_function(name)?;
                 let arg = &args[0];
-
                 // TODO: Hack!
                 if name.symbol.as_str() == "print" {
                     return if let ExprKind::Literal(LiteralKind::String(_)) = &arg.kind {
