@@ -394,6 +394,27 @@ fn test_errors() {
                 //^ ParseError: Expected type, found Equal instead
         }"#,
     );
+
+    assert_error(
+        r#"
+        export fn main() {
+        }
+        
+        fn foo() {}
+        fn foo(x int) int {}
+         //^^^ CompileError: Function 'foo' was already defined
+        "#,
+    );
+
+    assert_error(
+        r#"
+        export fn main() {
+        }
+        
+        fn print_int(x int) int {}
+         //^^^^^^^^^ CompileError: Function 'print_int' was already defined
+        "#,
+    );
 }
 
 #[test]

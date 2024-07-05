@@ -429,7 +429,7 @@ impl Compiler {
         self.imports
             .import(module, name, EntityType::Function(type_idx));
         self.symbol_table
-            .import_function(Symbol::from(name), params, return_ty);
+            .import_function(Symbol::from(name), params, return_ty)?;
         Ok(())
     }
 

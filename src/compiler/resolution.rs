@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
@@ -7,6 +8,7 @@ use crate::ast::{
     Symbol,
 };
 use crate::compiler::{compile_error, Counter, Ty};
+use crate::lexer::Span;
 
 #[derive(Copy, Clone, Debug)] // TODO: Should this be copy?
 pub struct LocalVar {
@@ -113,17 +115,30 @@ impl SymbolTable {
         Ok(())
     }
 
-    pub(super) fn import_function(&mut self, name: Symbol, params: &[Ty], return_ty: Ty) {
-        // TODO: Check duplicate functions!
-        self.functions.insert(
-            name,
-            Rc::new(FnSignature {
-                params: params.into(),
-                return_ty,
-                index: self.function_counter.next(),
-                locals: vec![],
-            }),
-        );
+    pub(super) fn import_function(
+        &mut self,
+        name: Symbol,
+        params: &[Ty],
+        return_ty: Ty,
+    ) -> Result<()> {
+        let signature = Rc::new(FnSignature {
+            params: params.into(),
+            return_ty,
+            index: self.function_counter.next(),
+            locals: vec![],
+        });
+
+        match self.functions.entry(name) {
+            Entry::Occupied(e) => {
+                return compile_error(
+                    format!("Imported function '{}' has already been declared", e.key()),
+                    Span(0, 0),
+                )
+            } // TODO: How to relate this with a span
+            Entry::Vacant(v) => v.insert(signature),
+        };
+
+        Ok(())
     }
 
     fn resolve_function(&mut self, function: &Function) -> Result<()> {
@@ -156,8 +171,15 @@ impl SymbolTable {
             locals: self.function_locals.iter().map(|l| l.ty).collect(),
         };
 
-        // TODO: Check duplicate functions!
-        self.functions.insert(name, Rc::new(signature));
+        match self.functions.entry(name) {
+            Entry::Occupied(e) => {
+                return compile_error(
+                    format!("Function '{}' was already defined", e.key()),
+                    function.name.node.span,
+                )
+            }
+            Entry::Vacant(v) => v.insert(Rc::new(signature)),
+        };
 
         Ok(())
     }
