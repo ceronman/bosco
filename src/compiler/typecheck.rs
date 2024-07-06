@@ -6,6 +6,7 @@ use crate::ast::{
 };
 use crate::compiler::{compile_error, Compiler, Ty};
 
+// TODO: Make into an independent compilation unit like Symbol Table?
 impl Compiler {
     pub(super) fn type_check(&mut self, module: &Module) -> Result<()> {
         for item in &module.items {
@@ -22,6 +23,7 @@ impl Compiler {
     }
 
     fn type_check_function(&mut self, function: &Function) -> Result<()> {
+        self.current_function = Some(self.symbol_table.lookup_function(&function.name)?);
         self.type_check_stmt(&function.body)?;
         Ok(())
     }
@@ -87,8 +89,16 @@ impl Compiler {
             }
 
             StmtKind::Return { expr } => {
-                self.type_check_expr(expr)?;
-                // TODO: Check that matches current function
+                let Some(signature) = self.current_function.clone() else {
+                    return compile_error("Return outside of a function", stmt.node.span);
+                };
+                let expr_ty = self.type_check_expr(expr)?;
+                if expr_ty != signature.return_ty {
+                    return compile_error(
+                        format!("Type Error: return type mismatch, expected {:?}, but found {expr_ty:?}", signature.return_ty),
+                        stmt.node.span
+                    );
+                }
             }
         }
         Ok(())

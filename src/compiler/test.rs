@@ -526,4 +526,25 @@ fn test_type_errors() {
             }
         }"#,
     );
+
+    assert_error(
+        r#"
+        export fn main() {
+            return 1
+          //^^^^^^^^ CompileError: Type Error: return type mismatch, expected Void, but found Int
+        }"#,
+    );
+
+    assert_error(
+        r#"
+        export fn main() {
+            let a int = foo(1)
+        }
+
+        fn foo(x int) int {
+            return true
+          //^^^^^^^^^^^ CompileError: Type Error: return type mismatch, expected Int, but found Bool
+        }
+        "#,
+    );
 }

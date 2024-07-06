@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-
 use anyhow::{bail, Result};
+use std::collections::HashMap;
+use std::rc::Rc;
 use thiserror::Error;
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
@@ -12,7 +12,7 @@ use crate::ast::{
     BinOpKind, Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind,
     Symbol, UnOpKind,
 };
-use crate::compiler::resolution::SymbolTable;
+use crate::compiler::resolution::{FnSignature, SymbolTable};
 use crate::lexer::Span;
 use crate::parser::parse;
 
@@ -81,6 +81,7 @@ struct Compiler {
     strings: HashMap<NodeId, WasmStr>,
     symbol_table: SymbolTable,
     expression_types: HashMap<NodeId, Ty>,
+    current_function: Option<Rc<FnSignature>>,
     types: TypeSection,
     functions: FunctionSection,
     codes: CodeSection,
