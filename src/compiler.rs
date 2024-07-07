@@ -44,8 +44,9 @@ pub enum Ty {
 }
 
 impl Ty {
-    fn from_ast(ast_ty: &ast::Ty) -> Result<Ty> {
-        let name = ast_ty.symbol.as_str();
+    fn from_ast(ast_ty: &ast::Type) -> Result<Ty> {
+        // TODO: use type parameters
+        let name = ast_ty.name.symbol.as_str();
         match name {
             "void" => Ok(Ty::Void),
             "int" => Ok(Ty::Int),

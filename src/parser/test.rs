@@ -5,7 +5,7 @@ use ariadne::{Label, Report, ReportKind, Source};
 
 use crate::ast::{
     BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module,
-    Param, Stmt, StmtKind, UnOp, UnOpKind,
+    Param, Stmt, StmtKind, Type, UnOp, UnOpKind,
 };
 use crate::parser::{parse, ParseError};
 
@@ -55,6 +55,16 @@ impl SExpr for Param {
 impl SExpr for Identifier {
     fn s_expr(&self) -> String {
         self.symbol.as_str().to_owned()
+    }
+}
+
+impl SExpr for Type {
+    fn s_expr(&self) -> String {
+        if self.params.is_empty() {
+            self.name.s_expr()
+        } else {
+            format!("{}<{}>", self.name.s_expr(), self.params.s_expr())
+        }
     }
 }
 
@@ -528,5 +538,21 @@ fn test_comments() {
             /*this*/print/*is*/(/*very*/"hello"/*annoying*/)/*!*/
         "#,
         (call print "hello")
+    }
+}
+
+#[test]
+fn test_types() {
+    test_main! {
+        r#"
+            let x int
+            let y array<foo>
+            let z map<string, int>
+            let a set<>
+        "#,
+        (let x int)
+        (let y array<foo>)
+        (let z map<string int>)
+        (let a set)
     }
 }

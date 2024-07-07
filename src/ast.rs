@@ -47,7 +47,7 @@ pub struct Item {
 pub struct Function {
     pub exported: bool,
     pub name: Identifier,
-    pub return_ty: Option<Ty>,
+    pub return_ty: Option<Type>,
     pub params: Vec<Param>,
     pub body: Stmt,
 }
@@ -60,7 +60,7 @@ pub enum ItemKind {
 #[derive(Debug)]
 pub struct Param {
     pub name: Identifier,
-    pub ty: Ty,
+    pub ty: Type,
 }
 
 #[derive(Debug)]
@@ -77,7 +77,7 @@ pub enum StmtKind {
     },
     Declaration {
         name: Identifier,
-        ty: Ty,
+        ty: Type,
         value: Option<Expr>,
     },
     Assignment {
@@ -172,4 +172,9 @@ pub struct Identifier {
     pub symbol: Symbol,
 }
 
-pub type Ty = Identifier;
+#[derive(Debug)]
+pub struct Type {
+    pub node: Node,
+    pub name: Identifier,
+    pub params: Vec<Identifier>,
+}

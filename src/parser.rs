@@ -4,7 +4,7 @@ mod test;
 use crate::ast::StmtKind::ExprStmt;
 use crate::ast::{
     BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module,
-    Node, NodeId, Param, Stmt, StmtKind, Symbol, Ty, UnOp, UnOpKind,
+    Node, NodeId, Param, Stmt, StmtKind, Symbol, Type, UnOp, UnOpKind,
 };
 use crate::lexer::{Lexer, Span, Token, TokenKind};
 use anyhow::Result;
@@ -61,7 +61,8 @@ impl<'src> Parser<'src> {
     fn function(&mut self) -> Result<Item> {
         let exported = self.eat(TokenKind::Export);
         let fn_keyword = self.expect(TokenKind::Fn)?;
-        let name = self.identifier()?;
+        let name =
+            self.identifier(|t| format!("Expected function name, found {:?} instead", t.kind))?;
         self.expect(TokenKind::LParen)?;
         let mut params = Vec::new();
         if self.token.kind != TokenKind::RParen {
@@ -93,8 +94,8 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn identifier(&mut self) -> Result<Identifier> {
-        let token = self.expect(TokenKind::Identifier)?;
+    fn identifier(&mut self, msg: impl Fn(Token) -> String) -> Result<Identifier> {
+        let token = self.expect_msg(TokenKind::Identifier, msg)?;
         let symbol = token.span.as_str(self.source).into();
         Ok(Identifier {
             node: self.node(token.span, token.span),
@@ -102,19 +103,36 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn ty(&mut self) -> Result<Ty> {
-        let token = self.expect_msg(TokenKind::Identifier, |token| {
-            format!("Expected type, found {:?} instead", token.kind)
-        })?;
-        let symbol = token.span.as_str(self.source).into();
-        Ok(Identifier {
-            node: self.node(token.span, token.span),
-            symbol,
+    fn ty(&mut self) -> Result<Type> {
+        let name = self.identifier(|t| format!("Expected type, found {:?} instead", t.kind))?;
+        let mut end = name.node.span;
+        let mut params = Vec::new();
+        if self.eat(TokenKind::Less) {
+            if self.token.kind != TokenKind::Greater {
+                loop {
+                    self.maybe_eol();
+                    params.push(self.identifier(|t| {
+                        format!("Expected type parameter, found {:?} instead", t.kind)
+                    })?);
+
+                    if !self.eat(TokenKind::Comma) {
+                        break;
+                    }
+                }
+            }
+            end = self.expect(TokenKind::Greater)?.span;
+        }
+
+        Ok(Type {
+            node: self.node(name.node.span, end),
+            name,
+            params,
         })
     }
 
     fn param(&mut self) -> Result<Param> {
-        let name = self.identifier()?;
+        let name =
+            self.identifier(|t| format!("Expected param name, found {:?} instead", t.kind))?;
         let ty = self.ty()?;
         Ok(Param { name, ty })
     }
@@ -329,7 +347,8 @@ impl<'src> Parser<'src> {
     }
 
     fn variable(&mut self) -> Result<Expr> {
-        let name = self.identifier()?;
+        let name =
+            self.identifier(|t| format!("Expected variable name, found {:?} instead", t.kind))?;
         Ok(Expr {
             node: name.node,
             kind: ExprKind::Variable(name),
@@ -337,7 +356,8 @@ impl<'src> Parser<'src> {
     }
 
     fn assignment(&mut self) -> Result<Stmt> {
-        let name = self.identifier()?;
+        let name =
+            self.identifier(|t| format!("Expected variable name, found {:?} instead", t.kind))?;
         self.expect(TokenKind::Equal)?;
         let value = self.expression()?;
         Ok(Stmt {
@@ -356,7 +376,8 @@ impl<'src> Parser<'src> {
 
     fn declaration(&mut self) -> Result<Stmt> {
         let let_kw = self.expect(TokenKind::Let)?;
-        let name = self.identifier()?;
+        let name =
+            self.identifier(|t| format!("Expected variable name, found {:?} instead", t.kind))?;
         let ty = self.ty()?;
         let (value, end_span) = if self.eat(TokenKind::Equal) {
             let initializer = self.expression()?;
