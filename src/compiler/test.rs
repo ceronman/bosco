@@ -316,6 +316,24 @@ fn test_functions() {
     )
 }
 
+#[test]
+fn test_arrays() {
+    program_test(
+        r#"
+            export fn main() {
+                let items Array<int, 5>
+                items[0] = 4
+                items[4] = 5
+                let result = items[0] * items[4]
+                print_int(result)
+            }
+        "#,
+        r#"
+            20
+        "#,
+    )
+}
+
 fn assert_error(annotated_source: &str) {
     let error_re = Regex::new(r"^\s*//\s*(\^*)\s+(.*)\n$").unwrap();
     let mut offset = 0;

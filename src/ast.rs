@@ -176,5 +176,11 @@ pub struct Identifier {
 pub struct Type {
     pub node: Node,
     pub name: Identifier,
-    pub params: Vec<Identifier>,
+    pub params: Vec<TypeParam>,
+}
+
+#[derive(Debug)]
+pub enum TypeParam {
+    Type(Identifier),
+    Const(i32)
 }

@@ -2,10 +2,7 @@
 mod test;
 
 use crate::ast::StmtKind::ExprStmt;
-use crate::ast::{
-    BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module,
-    Node, NodeId, Param, Stmt, StmtKind, Symbol, Type, UnOp, UnOpKind,
-};
+use crate::ast::{BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module, Node, NodeId, Param, Stmt, StmtKind, Symbol, Type, TypeParam, UnOp, UnOpKind};
 use crate::lexer::{Lexer, Span, Token, TokenKind};
 use anyhow::Result;
 use thiserror::Error;
@@ -111,10 +108,7 @@ impl<'src> Parser<'src> {
             if self.token.kind != TokenKind::Greater {
                 loop {
                     self.maybe_eol();
-                    params.push(self.identifier(|t| {
-                        format!("Expected type parameter, found {:?} instead", t.kind)
-                    })?);
-
+                    params.push(self.type_parameter()?);
                     if !self.eat(TokenKind::Comma) {
                         break;
                     }
@@ -128,6 +122,27 @@ impl<'src> Parser<'src> {
             name,
             params,
         })
+    }
+
+    fn type_parameter(&mut self) -> Result<TypeParam> {
+        let token = self.token;
+        let param = match token.kind {
+            TokenKind::Identifier => TypeParam::Type(self.identifier(|t| {
+                format!("Expected type parameter, found {:?} instead", t.kind)
+            })?),
+            TokenKind::Int => {
+                // TODO: Duplicate with literal int parsing
+                let value = token.span.as_str(self.source);
+                let value: i32 = value.parse().map_err(|e| ParseError {
+                    msg: format!("Unable to parse integer {value}: {e}"),
+                    span: token.span,
+                })?;
+                self.advance();
+                TypeParam::Const(value)
+            }
+            _ => return self.parse_error("Expected type parameter")
+        };
+        Ok(param)
     }
 
     fn param(&mut self) -> Result<Param> {

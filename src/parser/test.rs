@@ -3,10 +3,7 @@ use std::str::Chars;
 
 use ariadne::{Label, Report, ReportKind, Source};
 
-use crate::ast::{
-    BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module,
-    Param, Stmt, StmtKind, Type, UnOp, UnOpKind,
-};
+use crate::ast::{BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module, Param, Stmt, StmtKind, Type, TypeParam, UnOp, UnOpKind};
 use crate::parser::{parse, ParseError};
 
 trait SExpr {
@@ -64,6 +61,15 @@ impl SExpr for Type {
             self.name.s_expr()
         } else {
             format!("{}<{}>", self.name.s_expr(), self.params.s_expr())
+        }
+    }
+}
+
+impl SExpr for TypeParam {
+    fn s_expr(&self) -> String {
+        match self {
+            TypeParam::Type(t) => t.s_expr(),
+            TypeParam::Const(value) => format!("{value}")
         }
     }
 }
@@ -549,10 +555,12 @@ fn test_types() {
             let y array<foo>
             let z map<string, int>
             let a set<>
+            let b Array<int,5>
         "#,
         (let x int)
         (let y array<foo>)
         (let z map<string int>)
         (let a set)
+        (let b Array<int 5>)
     }
 }
