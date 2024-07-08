@@ -1,6 +1,7 @@
-use anyhow::{bail, Result};
 use std::collections::HashMap;
 use std::rc::Rc;
+
+use anyhow::{bail, Result};
 use thiserror::Error;
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
@@ -9,8 +10,8 @@ use wasm_encoder::{
 
 use crate::ast;
 use crate::ast::{
-    BinOpKind, Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind,
-    Symbol, UnOpKind,
+    AssignTargetKind, BinOpKind, Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId,
+    Stmt, StmtKind, Symbol, UnOpKind,
 };
 use crate::compiler::resolution::{FnSignature, SymbolTable};
 use crate::lexer::Span;
@@ -168,8 +169,13 @@ impl Compiler {
                 }
             }
 
-            StmtKind::Assignment { name, value } => {
-                let local_var = self.symbol_table.lookup_var(name)?;
+            StmtKind::Assignment { target, value } => {
+                let local_var = match &target.kind {
+                    AssignTargetKind::Variable(name) => self.symbol_table.lookup_var(name)?,
+                    AssignTargetKind::Array { .. } => {
+                        return compile_error("Arrays are not suported yet", stmt.node.span)
+                    }
+                };
                 self.expression(func, value)?; // TODO: Define what to do when declared var is used in initializer
                 func.instruction(&Instruction::LocalSet(local_var.index));
             }
@@ -358,7 +364,9 @@ impl Compiler {
                 let local_var = self.symbol_table.lookup_var(ident)?;
                 func.instruction(&Instruction::LocalGet(local_var.index));
             }
-
+            ExprKind::ArrayIndex { .. } => {
+                return compile_error("Unsupported array expr", expr.node.span)
+            }
             ExprKind::Call { callee, args } => {
                 let name = match &callee.kind {
                     ExprKind::Variable(ident) => ident,

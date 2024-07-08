@@ -2,9 +2,14 @@
 mod test;
 
 use crate::ast::StmtKind::ExprStmt;
-use crate::ast::{BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module, Node, NodeId, Param, Stmt, StmtKind, Symbol, Type, TypeParam, UnOp, UnOpKind};
+use crate::ast::{
+    AssignTarget, AssignTargetKind, BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item,
+    ItemKind, LiteralKind, Module, Node, NodeId, Param, Stmt, StmtKind, Symbol, Type, TypeParam,
+    UnOp, UnOpKind,
+};
 use crate::lexer::{Lexer, Span, Token, TokenKind};
 use anyhow::Result;
+use std::str::FromStr;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -126,22 +131,23 @@ impl<'src> Parser<'src> {
 
     fn type_parameter(&mut self) -> Result<TypeParam> {
         let token = self.token;
-        let param = match token.kind {
-            TokenKind::Identifier => TypeParam::Type(self.identifier(|t| {
-                format!("Expected type parameter, found {:?} instead", t.kind)
-            })?),
-            TokenKind::Int => {
-                // TODO: Duplicate with literal int parsing
-                let value = token.span.as_str(self.source);
-                let value: i32 = value.parse().map_err(|e| ParseError {
-                    msg: format!("Unable to parse integer {value}: {e}"),
-                    span: token.span,
-                })?;
-                self.advance();
-                TypeParam::Const(value)
-            }
-            _ => return self.parse_error("Expected type parameter")
-        };
+        let param =
+            match token.kind {
+                TokenKind::Identifier => TypeParam::Type(self.identifier(|t| {
+                    format!("Expected type parameter, found {:?} instead", t.kind)
+                })?),
+                TokenKind::Int => {
+                    // TODO: Duplicate with literal int parsing
+                    let value = token.span.as_str(self.source);
+                    let value: u32 = value.parse().map_err(|e| ParseError {
+                        msg: format!("Unable to parse const type parameter {value}: {e}"),
+                        span: token.span,
+                    })?;
+                    self.advance();
+                    TypeParam::Const(value)
+                }
+                _ => return self.parse_error("Expected type parameter"),
+            };
         Ok(param)
     }
 
@@ -160,7 +166,11 @@ impl<'src> Parser<'src> {
             TokenKind::If => self.if_statement(),
             TokenKind::While => self.while_statement(),
             TokenKind::Return => self.return_statement(),
-            TokenKind::Identifier if self.peek().kind == TokenKind::Equal => self.assignment(),
+            TokenKind::Identifier
+                if matches!(self.peek().kind, TokenKind::Equal | TokenKind::LBracket) =>
+            {
+                self.assignment()
+            }
             _ => self.expr_stmt(),
         }
     }
@@ -191,6 +201,7 @@ impl<'src> Parser<'src> {
 
             prefix = match self.token.kind {
                 TokenKind::LParen => self.call(prefix)?,
+                TokenKind::LBracket => self.array_index(prefix)?,
                 _ => self.binary_expr(prefix, precedence)?,
             };
         }
@@ -239,6 +250,20 @@ impl<'src> Parser<'src> {
             kind: ExprKind::Call {
                 callee: Box::new(prefix),
                 args,
+            },
+        })
+    }
+
+    fn array_index(&mut self, prefix: Expr) -> Result<Expr> {
+        self.expect(TokenKind::LBracket)?;
+        self.maybe_eol();
+        let index = self.expression()?;
+        let rbracket = self.expect(TokenKind::RBracket)?;
+        Ok(Expr {
+            node: self.node(prefix.node.span, rbracket.span),
+            kind: ExprKind::ArrayIndex {
+                expr: Box::new(prefix),
+                index: Box::new(index),
             },
         })
     }
@@ -308,7 +333,7 @@ impl<'src> Parser<'src> {
     fn infix_precedence(&self) -> Option<u8> {
         use TokenKind::*;
         match self.token.kind {
-            LParen                  => Some(7),
+            LParen | LBracket       => Some(7),
             Star | Slash | Percent  => Some(6),
             Plus | Minus            => Some(5),
             Greater | GreaterEqual
@@ -361,6 +386,15 @@ impl<'src> Parser<'src> {
         })
     }
 
+    fn number<T: FromStr>(&mut self, token: Token) -> Result<T> {
+        let value = token.span.as_str(self.source);
+        let result: T = value.parse().map_err(|_| ParseError {
+            msg: format!("Unable to parse number {value}"),
+            span: token.span,
+        })?;
+        Ok(result)
+    }
+
     fn variable(&mut self) -> Result<Expr> {
         let name =
             self.identifier(|t| format!("Expected variable name, found {:?} instead", t.kind))?;
@@ -371,14 +405,33 @@ impl<'src> Parser<'src> {
     }
 
     fn assignment(&mut self) -> Result<Stmt> {
-        let name =
-            self.identifier(|t| format!("Expected variable name, found {:?} instead", t.kind))?;
+        let target = self.assign_target()?;
         self.expect(TokenKind::Equal)?;
         let value = self.expression()?;
         Ok(Stmt {
-            node: self.node(name.node.span, value.node.span),
-            kind: StmtKind::Assignment { name, value },
+            node: self.node(target.node.span, value.node.span),
+            kind: StmtKind::Assignment { target, value },
         })
+    }
+
+    fn assign_target(&mut self) -> Result<AssignTarget> {
+        let name =
+            self.identifier(|t| format!("Expected variable name, found {:?} instead", t.kind))?;
+        let result = if self.eat(TokenKind::LBracket) {
+            let index_token = self.expect(TokenKind::Int)?;
+            let index: u32 = self.number(index_token)?;
+            let rbracket = self.expect(TokenKind::RBracket)?;
+            AssignTarget {
+                node: self.node(name.node.span, rbracket.span),
+                kind: AssignTargetKind::Array { name, index },
+            }
+        } else {
+            AssignTarget {
+                node: self.node(name.node.span, name.node.span),
+                kind: AssignTargetKind::Variable(name),
+            }
+        };
+        Ok(result)
     }
 
     fn expr_stmt(&mut self) -> Result<Stmt> {

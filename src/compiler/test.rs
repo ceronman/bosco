@@ -324,7 +324,7 @@ fn test_arrays() {
                 let items Array<int, 5>
                 items[0] = 4
                 items[4] = 5
-                let result = items[0] * items[4]
+                let result int = items[0] * items[4]
                 print_int(result)
             }
         "#,

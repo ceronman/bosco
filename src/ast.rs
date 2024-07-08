@@ -81,7 +81,7 @@ pub enum StmtKind {
         value: Option<Expr>,
     },
     Assignment {
-        name: Identifier,
+        target: AssignTarget,
         value: Expr,
     },
     If {
@@ -99,6 +99,18 @@ pub enum StmtKind {
 }
 
 #[derive(Debug)]
+pub struct AssignTarget {
+    pub node: Node,
+    pub kind: AssignTargetKind,
+}
+
+#[derive(Debug)]
+pub enum AssignTargetKind {
+    Variable(Identifier),
+    Array { name: Identifier, index: u32 },
+}
+
+#[derive(Debug)]
 pub struct Expr {
     pub node: Node,
     pub kind: ExprKind,
@@ -108,6 +120,10 @@ pub struct Expr {
 pub enum ExprKind {
     Literal(LiteralKind),
     Variable(Identifier),
+    ArrayIndex {
+        expr: Box<Expr>,
+        index: Box<Expr>,
+    },
     Unary {
         operator: UnOp,
         right: Box<Expr>,
@@ -182,5 +198,5 @@ pub struct Type {
 #[derive(Debug)]
 pub enum TypeParam {
     Type(Identifier),
-    Const(i32)
+    Const(u32),
 }

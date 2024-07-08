@@ -3,7 +3,10 @@ use std::str::Chars;
 
 use ariadne::{Label, Report, ReportKind, Source};
 
-use crate::ast::{BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module, Param, Stmt, StmtKind, Type, TypeParam, UnOp, UnOpKind};
+use crate::ast::{
+    AssignTarget, AssignTargetKind, BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item,
+    ItemKind, LiteralKind, Module, Param, Stmt, StmtKind, Type, TypeParam, UnOp, UnOpKind,
+};
 use crate::parser::{parse, ParseError};
 
 trait SExpr {
@@ -69,7 +72,7 @@ impl SExpr for TypeParam {
     fn s_expr(&self) -> String {
         match self {
             TypeParam::Type(t) => t.s_expr(),
-            TypeParam::Const(value) => format!("{value}")
+            TypeParam::Const(value) => format!("{value}"),
         }
     }
 }
@@ -87,8 +90,8 @@ impl SExpr for Stmt {
                 ty.s_expr(),
                 value.as_ref().map(|v| v.s_expr()).unwrap_or("".into())
             ),
-            StmtKind::Assignment { name, value } => {
-                format!("(= {} {})", name.s_expr(), value.s_expr())
+            StmtKind::Assignment { target, value } => {
+                format!("(= {} {})", target.s_expr(), value.s_expr())
             }
 
             StmtKind::If {
@@ -115,6 +118,15 @@ impl SExpr for Stmt {
     }
 }
 
+impl SExpr for AssignTarget {
+    fn s_expr(&self) -> String {
+        match &self.kind {
+            AssignTargetKind::Variable(name) => name.s_expr(),
+            AssignTargetKind::Array { name, index } => format!("{}[{index}]", name.s_expr()),
+        }
+    }
+}
+
 impl SExpr for Expr {
     fn s_expr(&self) -> String {
         match &self.kind {
@@ -136,6 +148,10 @@ impl SExpr for Expr {
 
             ExprKind::Call { callee, args } => {
                 format!("(call {} {})", callee.s_expr(), args.s_expr())
+            }
+
+            ExprKind::ArrayIndex { expr, index } => {
+                format!("(index {} {})", expr.s_expr(), index.s_expr())
             }
         }
     }

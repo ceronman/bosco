@@ -1,11 +1,12 @@
-use anyhow::Result;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
+use anyhow::Result;
+
 use crate::ast::{
-    Expr, ExprKind, Function, Identifier, Item, ItemKind, Module, NodeId, Param, Stmt, StmtKind,
-    Symbol,
+    AssignTargetKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, Module, NodeId, Param,
+    Stmt, StmtKind, Symbol,
 };
 use crate::compiler::{compile_error, Counter, Ty};
 use crate::lexer::Span;
@@ -211,8 +212,16 @@ impl SymbolTable {
                 }
             }
 
-            StmtKind::Assignment { name, value } => {
-                self.resolve_var(name)?;
+            StmtKind::Assignment { target, value } => {
+                match &target.kind {
+                    AssignTargetKind::Variable(name) => self.resolve_var(name)?,
+                    AssignTargetKind::Array { .. } => {
+                        return compile_error(
+                            "Assigning to arrays is not supported",
+                            statement.node.span,
+                        )
+                    }
+                };
                 self.resolve_expression(value)?;
             }
 
@@ -242,6 +251,9 @@ impl SymbolTable {
         match &expr.kind {
             ExprKind::Literal(_) => {}
             ExprKind::Variable(ident) => self.resolve_var(ident)?,
+            ExprKind::ArrayIndex { .. } => {
+                return compile_error("Unsupported array expr", expr.node.span)
+            }
             ExprKind::Binary { left, right, .. } => {
                 self.resolve_expression(left)?;
                 self.resolve_expression(right)?;

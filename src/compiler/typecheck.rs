@@ -1,8 +1,8 @@
 use anyhow::Result;
 
 use crate::ast::{
-    BinOpKind, Expr, ExprKind, Function, Item, ItemKind, LiteralKind, Module, Stmt, StmtKind,
-    UnOpKind,
+    AssignTargetKind, BinOpKind, Expr, ExprKind, Function, Item, ItemKind, LiteralKind, Module,
+    Stmt, StmtKind, UnOpKind,
 };
 use crate::compiler::{compile_error, Compiler, Ty};
 
@@ -50,8 +50,13 @@ impl Compiler {
                     }
                 }
             }
-            StmtKind::Assignment { name, value } => {
-                let var_ty = self.symbol_table.lookup_var(name)?.ty;
+            StmtKind::Assignment { target, value } => {
+                let var_ty = match &target.kind {
+                    AssignTargetKind::Variable(name) => self.symbol_table.lookup_var(name)?.ty,
+                    AssignTargetKind::Array { .. } => {
+                        return compile_error("Arrays are not supported yet", stmt.node.span)
+                    }
+                };
                 let initializer_ty = self.type_check_expr(value)?;
                 if initializer_ty != var_ty {
                     return compile_error(
@@ -113,6 +118,9 @@ impl Compiler {
             ExprKind::Variable(ident) => {
                 let local_var = self.symbol_table.lookup_var(ident)?;
                 local_var.ty
+            }
+            ExprKind::ArrayIndex { .. } => {
+                return compile_error("Unsupported array expr", expr.node.span)
             }
             ExprKind::Binary {
                 left,
