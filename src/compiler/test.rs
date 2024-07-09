@@ -2,7 +2,8 @@ use ariadne::{Label, Report, ReportKind, Source};
 use regex::Regex;
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
-use wasmi::{Caller, Engine, Func, Linker, Memory, MemoryType, Module, Store};
+use anyhow::bail;
+use wasmi::{Caller, Engine, Extern, Func, Linker, Memory, MemoryType, Module, Store};
 
 use crate::compiler::{compile, CompileError};
 use crate::lexer::Span;
@@ -17,15 +18,16 @@ fn run_in_wasmi(source: &str) -> anyhow::Result<String> {
     type HostState = ();
     let mut store = Store::new(&engine, ());
 
-    let memory_type = MemoryType::new(1, None).unwrap();
-    let memory = Memory::new(&mut store, memory_type).unwrap();
-    let imported_memory = memory.clone();
     let output = Arc::new(Mutex::new(String::new()));
     let output_print = output.clone();
     let print = Func::wrap(
         &mut store,
         move |caller: Caller<'_, ()>, ptr: i32, len: i32| {
-            let bytes = &imported_memory.data(&caller)[(ptr as usize)..(ptr + len) as usize];
+            let mem = match caller.get_export("memory") {
+                Some(Extern::Memory(mem)) => mem,
+                _ => return Err(wasmi::Error::new("Memory not found"))
+            };
+            let bytes = &mem.data(&caller)[(ptr as usize)..(ptr + len) as usize];
             let message = std::str::from_utf8(bytes).unwrap();
             output_print.lock().unwrap().push_str(message);
             output_print.lock().unwrap().push('\n');
@@ -55,9 +57,9 @@ fn run_in_wasmi(source: &str) -> anyhow::Result<String> {
     linker.define("js", "print", print)?;
     linker.define("js", "print_int", print_int)?;
     linker.define("js", "print_float", print_float)?;
-    linker.define("js", "mem", memory)?;
 
     let instance = linker.instantiate(&mut store, &module)?.start(&mut store)?;
+
     let hello = instance.get_typed_func::<(), ()>(&store, "main")?;
     hello.call(&mut store, ())?;
 

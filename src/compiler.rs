@@ -3,10 +3,7 @@ use std::rc::Rc;
 
 use anyhow::{bail, Result};
 use thiserror::Error;
-use wasm_encoder::{
-    BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
-    FunctionSection, ImportSection, Instruction, MemoryType, TypeSection, ValType,
-};
+use wasm_encoder::{BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection, FunctionSection, ImportSection, Instruction, MemorySection, MemoryType, TypeSection, ValType};
 
 use crate::ast;
 use crate::ast::{
@@ -86,6 +83,7 @@ struct Compiler {
     current_function: Option<Rc<FnSignature>>,
     types: TypeSection,
     functions: FunctionSection,
+    memories: MemorySection,
     codes: CodeSection,
     data: DataSection,
     data_offset: u32,
@@ -434,18 +432,16 @@ impl Compiler {
         Ok(())
     }
 
-    fn import_memory(&mut self) {
-        self.imports.import(
-            "js",
-            "mem",
-            EntityType::Memory(MemoryType {
-                minimum: 0,
-                maximum: None,
-                memory64: false,
-                shared: false,
-                page_size_log2: None,
-            }),
-        );
+    fn export_memory(&mut self) {
+        let memory = MemoryType {
+            minimum: 16, // TODO: temporary size
+            maximum: None,
+            memory64: false,
+            shared: false,
+            page_size_log2: None,
+        };
+        self.memories.memory(memory);
+        self.exports.export("memory", ExportKind::Memory, 0);
     }
 
     fn encode_wasm(&mut self) -> Result<Vec<u8>> {
@@ -453,6 +449,7 @@ impl Compiler {
         wasm_module.section(&self.types);
         wasm_module.section(&self.imports);
         wasm_module.section(&self.functions);
+        wasm_module.section(&self.memories);
         wasm_module.section(&self.exports);
         wasm_module.section(&self.codes);
         wasm_module.section(&self.data);
@@ -461,7 +458,7 @@ impl Compiler {
 
     fn compile(&mut self, module: &Module) -> Result<Vec<u8>> {
         self.import_functions()?;
-        self.import_memory();
+        self.export_memory();
         self.symbol_table.resolve(module)?;
         self.type_check(module)?;
         self.module(module)?;
