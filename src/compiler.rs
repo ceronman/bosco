@@ -3,7 +3,10 @@ use std::rc::Rc;
 
 use anyhow::{bail, Result};
 use thiserror::Error;
-use wasm_encoder::{BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection, FunctionSection, ImportSection, Instruction, MemorySection, MemoryType, TypeSection, ValType};
+use wasm_encoder::{
+    BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
+    FunctionSection, ImportSection, Instruction, MemorySection, MemoryType, TypeSection, ValType,
+};
 
 use crate::ast;
 use crate::ast::{

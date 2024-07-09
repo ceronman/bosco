@@ -1,9 +1,9 @@
-use ariadne::{Label, Report, ReportKind, Source};
-use regex::Regex;
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
-use anyhow::bail;
-use wasmi::{Caller, Engine, Extern, Func, Linker, Memory, MemoryType, Module, Store};
+
+use ariadne::{Label, Report, ReportKind, Source};
+use regex::Regex;
+use wasmi::{Caller, Engine, Extern, Func, Linker, Module, Store};
 
 use crate::compiler::{compile, CompileError};
 use crate::lexer::Span;
@@ -25,7 +25,7 @@ fn run_in_wasmi(source: &str) -> anyhow::Result<String> {
         move |caller: Caller<'_, ()>, ptr: i32, len: i32| {
             let mem = match caller.get_export("memory") {
                 Some(Extern::Memory(mem)) => mem,
-                _ => return Err(wasmi::Error::new("Memory not found"))
+                _ => return Err(wasmi::Error::new("Memory not found")),
             };
             let bytes = &mem.data(&caller)[(ptr as usize)..(ptr + len) as usize];
             let message = std::str::from_utf8(bytes).unwrap();
