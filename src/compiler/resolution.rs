@@ -216,12 +216,8 @@ impl SymbolTable {
 
             StmtKind::Assignment { target, value } => {
                 match &target.kind {
-                    AssignTargetKind::Variable(name) => self.resolve_var(name)?,
-                    AssignTargetKind::Array { .. } => {
-                        return compile_error(
-                            "Assigning to arrays is not supported",
-                            statement.node.span,
-                        )
+                    AssignTargetKind::Variable(name) | AssignTargetKind::Array { name, .. } => {
+                        self.resolve_var(name)?
                     }
                 };
                 self.resolve_expression(value)?;
@@ -253,8 +249,8 @@ impl SymbolTable {
         match &expr.kind {
             ExprKind::Literal(_) => {}
             ExprKind::Variable(ident) => self.resolve_var(ident)?,
-            ExprKind::ArrayIndex { .. } => {
-                return compile_error("Unsupported array expr", expr.node.span)
+            ExprKind::ArrayIndex { expr, .. } => {
+                self.resolve_expression(expr)?;
             }
             ExprKind::Binary { left, right, .. } => {
                 self.resolve_expression(left)?;

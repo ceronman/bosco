@@ -52,13 +52,19 @@ impl Compiler {
             }
             StmtKind::Assignment { target, value } => {
                 let var_ty = match &target.kind {
-                    AssignTargetKind::Variable(name) => &self.symbol_table.lookup_var(name)?.ty,
-                    AssignTargetKind::Array { .. } => {
-                        return compile_error("Arrays are not supported yet", stmt.node.span)
+                    AssignTargetKind::Variable(name) => {
+                        self.symbol_table.lookup_var(name)?.ty.clone()
+                    }
+                    AssignTargetKind::Array { name, .. } => {
+                        let array_ty = &self.symbol_table.lookup_var(name)?.ty;
+                        let Ty::Array(inner, _) = array_ty else {
+                            return compile_error(format!("The type '{array_ty:?}' cannot be indexed because it's not an array"), name.node.span);
+                        };
+                        (**inner).clone()
                     }
                 };
                 let initializer_ty = self.type_check_expr(value)?;
-                if initializer_ty != *var_ty {
+                if initializer_ty != var_ty {
                     return compile_error(
                         format!("Type Error: expected {var_ty:?} but found {initializer_ty:?}"),
                         value.node.span,
@@ -119,8 +125,15 @@ impl Compiler {
                 let local_var = self.symbol_table.lookup_var(ident)?;
                 local_var.ty.clone()
             }
-            ExprKind::ArrayIndex { .. } => {
-                return compile_error("Unsupported array expr", expr.node.span)
+            ExprKind::ArrayIndex { expr, .. } => {
+                let expr_ty = self.type_check_expr(expr)?;
+                let Ty::Array(inner, _) = expr_ty else {
+                    return compile_error(
+                        format!("Expecting an Array, found {expr_ty:?}"),
+                        expr.node.span,
+                    );
+                };
+                (*inner).clone()
             }
             ExprKind::Binary {
                 left,

@@ -567,4 +567,23 @@ fn test_type_errors() {
         }
         "#,
     );
+    assert_error(
+        r#"
+        export fn main() {
+            let a int = 1
+            let b int = a[1]
+                      //^ CompileError: Expecting an Array, found Int
+        }
+        "#,
+    );
+
+    assert_error(
+        r#"
+        export fn main() {
+            let a int = 1
+            a[1] = 2
+          //^ CompileError: The type 'Int' cannot be indexed because it's not an array
+        }
+        "#,
+    );
 }

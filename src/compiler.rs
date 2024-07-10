@@ -77,9 +77,8 @@ impl Ty {
 
     fn as_wasm(&self) -> Result<ValType> {
         match self {
-            Ty::Int => Ok(ValType::I32),
+            Ty::Int | Ty::Bool | Ty::Array(_, _) => Ok(ValType::I32),
             Ty::Float => Ok(ValType::F64),
-            Ty::Bool => Ok(ValType::I32),
             _ => bail!("{self:?} type does not have a wasm equivalent"),
         }
     }
