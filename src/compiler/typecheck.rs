@@ -39,10 +39,10 @@ impl Compiler {
                 self.type_check_expr(expr)?;
             }
             StmtKind::Declaration { name, value, .. } => {
-                let var_ty = self.symbol_table.lookup_var(name)?.ty;
+                let var_ty = &self.symbol_table.lookup_var(name)?.ty;
                 if let Some(value) = value {
                     let initializer_ty = self.type_check_expr(value)?;
-                    if initializer_ty != var_ty {
+                    if initializer_ty != *var_ty {
                         return compile_error(
                             format!("Type Error: expected {var_ty:?} but found {initializer_ty:?}"),
                             value.node.span,
@@ -52,13 +52,13 @@ impl Compiler {
             }
             StmtKind::Assignment { target, value } => {
                 let var_ty = match &target.kind {
-                    AssignTargetKind::Variable(name) => self.symbol_table.lookup_var(name)?.ty,
+                    AssignTargetKind::Variable(name) => &self.symbol_table.lookup_var(name)?.ty,
                     AssignTargetKind::Array { .. } => {
                         return compile_error("Arrays are not supported yet", stmt.node.span)
                     }
                 };
                 let initializer_ty = self.type_check_expr(value)?;
-                if initializer_ty != var_ty {
+                if initializer_ty != *var_ty {
                     return compile_error(
                         format!("Type Error: expected {var_ty:?} but found {initializer_ty:?}"),
                         value.node.span,
@@ -117,7 +117,7 @@ impl Compiler {
             ExprKind::Literal(LiteralKind::Bool(_)) => Ty::Bool,
             ExprKind::Variable(ident) => {
                 let local_var = self.symbol_table.lookup_var(ident)?;
-                local_var.ty
+                local_var.ty.clone()
             }
             ExprKind::ArrayIndex { .. } => {
                 return compile_error("Unsupported array expr", expr.node.span)
@@ -199,21 +199,21 @@ impl Compiler {
                     }
                     for (i, arg) in args.iter().enumerate() {
                         let arg_ty = self.type_check_expr(arg)?;
-                        let param_ty = sig.params[i];
-                        if arg_ty != param_ty {
+                        let param_ty = &sig.params[i];
+                        if arg_ty != *param_ty {
                             return compile_error(
                                 "Type Error: argument type mismatch",
                                 arg.node.span,
                             );
                         }
                     }
-                    sig.return_ty
+                    sig.return_ty.clone()
                 } else {
                     return compile_error("First class functions not supported", callee.node.span);
                 }
             }
         };
-        self.expression_types.insert(expr.node.id, ty);
+        self.expression_types.insert(expr.node.id, ty.clone());
         Ok(ty)
     }
 }

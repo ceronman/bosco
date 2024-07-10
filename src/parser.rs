@@ -131,23 +131,20 @@ impl<'src> Parser<'src> {
 
     fn type_parameter(&mut self) -> Result<TypeParam> {
         let token = self.token;
-        let param =
-            match token.kind {
-                TokenKind::Identifier => TypeParam::Type(self.identifier(|t| {
-                    format!("Expected type parameter, found {:?} instead", t.kind)
-                })?),
-                TokenKind::Int => {
-                    // TODO: Duplicate with literal int parsing
-                    let value = token.span.as_str(self.source);
-                    let value: u32 = value.parse().map_err(|e| ParseError {
-                        msg: format!("Unable to parse const type parameter {value}: {e}"),
-                        span: token.span,
-                    })?;
-                    self.advance();
-                    TypeParam::Const(value)
-                }
-                _ => return self.parse_error("Expected type parameter"),
-            };
+        let param = match token.kind {
+            TokenKind::Identifier => TypeParam::Type(Box::new(self.ty()?)),
+            TokenKind::Int => {
+                // TODO: Duplicate with literal int parsing
+                let value = token.span.as_str(self.source);
+                let value: u32 = value.parse().map_err(|e| ParseError {
+                    msg: format!("Unable to parse const type parameter {value}: {e}"),
+                    span: token.span,
+                })?;
+                self.advance();
+                TypeParam::Const(value)
+            }
+            _ => return self.parse_error("Expected type parameter"),
+        };
         Ok(param)
     }
 

@@ -11,7 +11,7 @@ use wasm_encoder::{
 use crate::ast;
 use crate::ast::{
     AssignTargetKind, BinOpKind, Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId,
-    Stmt, StmtKind, Symbol, UnOpKind,
+    Stmt, StmtKind, Symbol, TypeParam, UnOpKind,
 };
 use crate::compiler::resolution::{FnSignature, SymbolTable};
 use crate::lexer::Span;
@@ -36,33 +36,51 @@ pub struct CompileError {
     span: Span,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub enum Ty {
     Void,
     Int,
     Float,
     Bool,
+    Array(Rc<Ty>, u32),
 }
 
 impl Ty {
     fn from_ast(ast_ty: &ast::Type) -> Result<Ty> {
-        // TODO: use type parameters
+        // TODO: check no type parameters for primitives
         let name = ast_ty.name.symbol.as_str();
         match name {
             "void" => Ok(Ty::Void),
             "int" => Ok(Ty::Int),
             "float" => Ok(Ty::Float),
             "bool" => Ok(Ty::Bool),
+            "Array" => {
+                let mut params = ast_ty.params.iter();
+                let Some(TypeParam::Type(inner)) = params.next() else {
+                    return compile_error(
+                        "Array requires a valid inner type parameter",
+                        ast_ty.node.span,
+                    );
+                };
+                let Some(TypeParam::Const(size)) = params.next() else {
+                    return compile_error(
+                        "Array requires a valid size type parameter",
+                        ast_ty.node.span,
+                    );
+                };
+                let inner = Ty::from_ast(inner)?;
+                Ok(Ty::Array(Rc::from(inner), *size))
+            }
             _ => compile_error(format!("Unknown type {name}"), ast_ty.node.span),
         }
     }
 
     fn as_wasm(&self) -> Result<ValType> {
         match self {
-            Ty::Void => bail!("Void type does not have a wasm equivalent"),
             Ty::Int => Ok(ValType::I32),
             Ty::Float => Ok(ValType::F64),
             Ty::Bool => Ok(ValType::I32),
+            _ => bail!("{self:?} type does not have a wasm equivalent"),
         }
     }
 }
@@ -272,7 +290,7 @@ impl Compiler {
                 self.expression(func, left)?;
                 self.expression(func, right)?;
 
-                let Some(&ty) = self.expression_types.get(&left.node.id) else {
+                let Some(ty) = self.expression_types.get(&left.node.id) else {
                     return compile_error("Fatal: Not type found for expression", left.node.span);
                 };
 
@@ -331,7 +349,7 @@ impl Compiler {
                     func.instruction(&Instruction::End);
                 }
                 UnOpKind::Neg => {
-                    let Some(&ty) = self.expression_types.get(&right.node.id) else {
+                    let Some(ty) = self.expression_types.get(&right.node.id) else {
                         return compile_error(
                             "Fatal: Not type found for expression",
                             right.node.span,

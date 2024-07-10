@@ -197,6 +197,6 @@ pub struct Type {
 
 #[derive(Debug)]
 pub enum TypeParam {
-    Type(Identifier),
+    Type(Box<Type>),
     Const(u32),
 }

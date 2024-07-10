@@ -11,13 +11,15 @@ use crate::ast::{
 use crate::compiler::{compile_error, Counter, Ty};
 use crate::lexer::Span;
 
-#[derive(Copy, Clone, Debug)] // TODO: Should this be copy?
+#[derive(Debug)]
 pub struct LocalVar {
     pub index: u32,
     pub ty: Ty,
 }
 
-#[derive(Debug, Clone)]
+type LocalVarRef = Rc<LocalVar>;
+
+#[derive(Debug)]
 pub struct FnSignature {
     pub params: Vec<Ty>,
     pub return_ty: Ty,
@@ -27,11 +29,11 @@ pub struct FnSignature {
 
 #[derive(Default)]
 pub(super) struct SymbolTable {
-    environments: VecDeque<HashMap<Symbol, LocalVar>>,
-    locals: HashMap<NodeId, LocalVar>,
+    environments: VecDeque<HashMap<Symbol, LocalVarRef>>,
+    locals: HashMap<NodeId, LocalVarRef>,
     functions: HashMap<Symbol, Rc<FnSignature>>,
     function_counter: Counter,
-    function_locals: Vec<LocalVar>,
+    function_locals: Vec<LocalVarRef>,
 }
 
 impl SymbolTable {
@@ -55,20 +57,20 @@ impl SymbolTable {
                 ident.node.span,
             );
         }
-        let local_var = LocalVar {
+        let local_var = Rc::from(LocalVar {
             index: self.function_locals.len() as u32,
             ty,
-        };
-        env.insert(ident.symbol.clone(), local_var);
-        self.locals.insert(ident.node.id, local_var);
-        self.function_locals.push(local_var);
+        });
+        env.insert(ident.symbol.clone(), Rc::clone(&local_var));
+        self.locals.insert(ident.node.id, Rc::clone(&local_var));
+        self.function_locals.push(Rc::clone(&local_var));
         Ok(())
     }
 
     fn resolve_var(&mut self, ident: &Identifier) -> Result<()> {
         for env in &self.environments {
-            if let Some(&local_var) = env.get(&ident.symbol) {
-                self.locals.insert(ident.node.id, local_var);
+            if let Some(local_var) = env.get(&ident.symbol) {
+                self.locals.insert(ident.node.id, Rc::clone(local_var));
                 return Ok(());
             }
         }
@@ -78,14 +80,14 @@ impl SymbolTable {
         )
     }
 
-    pub(super) fn lookup_var(&self, ident: &Identifier) -> Result<LocalVar> {
-        let Some(&local) = self.locals.get(&ident.node.id) else {
+    pub(super) fn lookup_var(&self, ident: &Identifier) -> Result<LocalVarRef> {
+        let Some(local) = self.locals.get(&ident.node.id) else {
             return compile_error(
                 format!("Undeclared variable '{}'", ident.symbol),
                 ident.node.span,
             );
         };
-        Ok(local)
+        Ok(Rc::clone(local))
     }
 
     pub(super) fn lookup_function(&self, name: &Identifier) -> Result<Rc<FnSignature>> {
@@ -175,7 +177,7 @@ impl SymbolTable {
             params,
             return_ty,
             index: self.function_counter.next(),
-            locals: self.function_locals.iter().map(|l| l.ty).collect(),
+            locals: self.function_locals.iter().map(|l| l.ty.clone()).collect(),
         };
 
         match self.functions.entry(name) {
