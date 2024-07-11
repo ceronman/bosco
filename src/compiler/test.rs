@@ -327,10 +327,16 @@ fn test_arrays() {
                 items[0] = 4
                 items[4] = 5
                 let result int = items[0] * items[4]
+                let i int = 0
+                print_int(items[i])
+                i = 4
+                print_int(items[i])
                 print_int(result)
             }
         "#,
         r#"
+            4
+            5
             20
         "#,
     )

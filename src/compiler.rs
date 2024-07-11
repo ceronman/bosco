@@ -5,7 +5,8 @@ use anyhow::{bail, Result};
 use thiserror::Error;
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
-    FunctionSection, ImportSection, Instruction, MemorySection, MemoryType, TypeSection, ValType,
+    FunctionSection, ImportSection, Instruction, MemArg, MemorySection, MemoryType, TypeSection,
+    ValType,
 };
 
 use crate::ast;
@@ -13,7 +14,7 @@ use crate::ast::{
     AssignTargetKind, BinOpKind, Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId,
     Stmt, StmtKind, Symbol, TypeParam, UnOpKind,
 };
-use crate::compiler::resolution::{FnSignature, SymbolTable};
+use crate::compiler::resolution::{Address, FnSignature, SymbolTable};
 use crate::lexer::Span;
 use crate::parser::parse;
 
@@ -72,6 +73,16 @@ impl Ty {
                 Ok(Ty::Array(Rc::from(inner), *size))
             }
             _ => compile_error(format!("Unknown type {name}"), ast_ty.node.span),
+        }
+    }
+
+    fn size(&self) -> u32 {
+        match self {
+            Ty::Void => 0,
+            Ty::Int => 4,
+            Ty::Float => 8,
+            Ty::Bool => 1,
+            Ty::Array(inner, length) => inner.size() * length,
         }
     }
 
@@ -183,19 +194,52 @@ impl Compiler {
                 if let Some(value) = value {
                     let local_var = self.symbol_table.lookup_var(name)?;
                     self.expression(func, value)?; // TODO: Define what to do when declared var is used in initializer
-                    func.instruction(&Instruction::LocalSet(local_var.index));
+                    match local_var.address {
+                        Address::Var(index) => {
+                            func.instruction(&Instruction::LocalSet(index));
+                        }
+                        Address::Mem(_) => {}
+                        Address::None => {}
+                    }
                 }
             }
 
             StmtKind::Assignment { target, value } => {
-                let local_var = match &target.kind {
-                    AssignTargetKind::Variable(name) => self.symbol_table.lookup_var(name)?,
-                    AssignTargetKind::Array { .. } => {
-                        return compile_error("Arrays are not suported yet", stmt.node.span)
+                match &target.kind {
+                    AssignTargetKind::Variable(name) => {
+                        let local = self.symbol_table.lookup_var(name)?;
+                        let Address::Var(index) = local.address else {
+                            todo!("Fixme!")
+                        };
+                        self.expression(func, value)?;
+                        func.instruction(&Instruction::LocalSet(index));
                     }
-                };
-                self.expression(func, value)?; // TODO: Define what to do when declared var is used in initializer
-                func.instruction(&Instruction::LocalSet(local_var.index));
+                    AssignTargetKind::Array { name, index } => {
+                        let local = self.symbol_table.lookup_var(name)?;
+                        let Address::Mem(addr) = local.address else {
+                            todo!("Fixme!");
+                        };
+                        // TODO: Check bounds
+                        let Ty::Array(inner, _size) = &local.ty else {
+                            todo!("Fixme!");
+                        };
+                        let offset = inner.size() * index;
+                        match **inner {
+                            Ty::Void => {}
+                            Ty::Int => {}
+                            Ty::Float => {}
+                            Ty::Bool => {}
+                            Ty::Array(_, _) => todo!("Fixme!"),
+                        }
+                        func.instruction(&Instruction::I32Const(addr as i32));
+                        self.expression(func, value)?;
+                        func.instruction(&Instruction::I32Store(MemArg {
+                            offset: offset as u64,
+                            align: 2, // TODO: Do properly
+                            memory_index: 0,
+                        }));
+                    }
+                }
             }
 
             StmtKind::If {
@@ -380,10 +424,31 @@ impl Compiler {
             },
             ExprKind::Variable(ident) => {
                 let local_var = self.symbol_table.lookup_var(ident)?;
-                func.instruction(&Instruction::LocalGet(local_var.index));
+                match local_var.address {
+                    Address::Var(index) => {
+                        func.instruction(&Instruction::LocalGet(index));
+                    }
+                    Address::Mem(addr) => {
+                        func.instruction(&Instruction::I32Const(addr as i32));
+                    }
+                    Address::None => {}
+                }
             }
-            ExprKind::ArrayIndex { .. } => {
-                return compile_error("Unsupported array expr", expr.node.span)
+            ExprKind::ArrayIndex { expr, index } => {
+                let Some(Ty::Array(inner, _)) = self.expression_types.get(&expr.node.id) else {
+                    return compile_error("Fatal: Expression is not an array", expr.node.span);
+                };
+                let size = inner.size() as i32;
+                self.expression(func, expr)?;
+                func.instruction(&Instruction::I32Const(size));
+                self.expression(func, index)?;
+                func.instruction(&Instruction::I32Mul);
+                func.instruction(&Instruction::I32Add);
+                func.instruction(&Instruction::I32Load(MemArg {
+                    offset: 0,
+                    align: 2,
+                    memory_index: 0,
+                }));
             }
             ExprKind::Call { callee, args } => {
                 let name = match &callee.kind {

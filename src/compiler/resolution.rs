@@ -12,12 +12,19 @@ use crate::compiler::{compile_error, Counter, Ty};
 use crate::lexer::Span;
 
 #[derive(Debug)]
-pub struct LocalVar {
-    pub index: u32,
+pub struct Local {
+    pub address: Address,
     pub ty: Ty,
 }
 
-type LocalVarRef = Rc<LocalVar>;
+#[derive(Debug)]
+pub enum Address {
+    None,
+    Var(u32),
+    Mem(u32),
+}
+
+type LocalVarRef = Rc<Local>;
 
 #[derive(Debug)]
 pub struct FnSignature {
@@ -33,7 +40,8 @@ pub(super) struct SymbolTable {
     locals: HashMap<NodeId, LocalVarRef>,
     functions: HashMap<Symbol, Rc<FnSignature>>,
     function_counter: Counter,
-    function_locals: Vec<LocalVarRef>,
+    function_locals: Vec<Ty>,
+    free_address: u32,
 }
 
 impl SymbolTable {
@@ -57,13 +65,25 @@ impl SymbolTable {
                 ident.node.span,
             );
         }
-        let local_var = Rc::from(LocalVar {
-            index: self.function_locals.len() as u32,
-            ty,
-        });
+
+        let address = match &ty {
+            Ty::Array(_, _) => {
+                let pointer = self.free_address;
+                self.free_address += ty.size();
+                Address::Mem(pointer)
+            }
+            Ty::Void => Address::None,
+            _ => {
+                let index = self.function_locals.len() as u32;
+                self.function_locals.push(ty.clone());
+                Address::Var(index)
+            }
+        };
+
+        let local_var = Rc::from(Local { address, ty });
         env.insert(ident.symbol.clone(), Rc::clone(&local_var));
         self.locals.insert(ident.node.id, Rc::clone(&local_var));
-        self.function_locals.push(Rc::clone(&local_var));
+
         Ok(())
     }
 
@@ -177,7 +197,7 @@ impl SymbolTable {
             params,
             return_ty,
             index: self.function_counter.next(),
-            locals: self.function_locals.iter().map(|l| l.ty.clone()).collect(),
+            locals: self.function_locals.clone(),
         };
 
         match self.functions.entry(name) {
@@ -249,8 +269,9 @@ impl SymbolTable {
         match &expr.kind {
             ExprKind::Literal(_) => {}
             ExprKind::Variable(ident) => self.resolve_var(ident)?,
-            ExprKind::ArrayIndex { expr, .. } => {
+            ExprKind::ArrayIndex { expr, index } => {
                 self.resolve_expression(expr)?;
+                self.resolve_expression(index)?;
             }
             ExprKind::Binary { left, right, .. } => {
                 self.resolve_expression(left)?;
