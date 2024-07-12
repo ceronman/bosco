@@ -6,7 +6,6 @@ use regex::Regex;
 use wasmi::{Caller, Engine, Extern, Func, Linker, Module, Store};
 
 use crate::compiler::{compile, CompileError};
-use crate::lexer::Span;
 use crate::parser::ParseError;
 
 fn run_in_wasmi(source: &str) -> anyhow::Result<String> {
@@ -81,27 +80,28 @@ fn program_test(source: &str, expected_out: &str) {
             );
         }
         Err(dynamic_error) => {
-            let mut title = "Unknown error";
-            let mut message = format!("{dynamic_error:?}");
-            let mut span = Span(0, 0);
+            // TODO Make CompilerError enum to avoid this kind of duplication
             if let Some(e) = dynamic_error.downcast_ref::<CompileError>() {
-                title = "Compile Error";
-                message = e.msg.clone();
-                span = e.span;
+                let mut buffer = Vec::new();
+                Report::build(ReportKind::Error, (), e.span.0)
+                    .with_message("Compile Error")
+                    .with_label(Label::new(e.span.0..e.span.1).with_message(&e.msg))
+                    .finish()
+                    .write(Source::from(source), &mut buffer)
+                    .unwrap();
+                panic!("{}\n{dynamic_error:?}", String::from_utf8(buffer).unwrap());
+            } else if let Some(e) = dynamic_error.downcast_ref::<ParseError>() {
+                let mut buffer = Vec::new();
+                Report::build(ReportKind::Error, (), e.span.0)
+                    .with_message("Parse Error")
+                    .with_label(Label::new(e.span.0..e.span.1).with_message(&e.msg))
+                    .finish()
+                    .write(Source::from(source), &mut buffer)
+                    .unwrap();
+                panic!("{}\n{dynamic_error:?}", String::from_utf8(buffer).unwrap());
+            } else {
+                panic!("{dynamic_error:?}");
             }
-            if let Some(e) = dynamic_error.downcast_ref::<ParseError>() {
-                title = "Parse Error";
-                message = e.msg.clone();
-                span = e.span;
-            }
-            let mut buffer = Vec::new();
-            Report::build(ReportKind::Error, (), span.0)
-                .with_message(title)
-                .with_label(Label::new(span.0..span.1).with_message(message))
-                .finish()
-                .write(Source::from(source), &mut buffer)
-                .unwrap();
-            panic!("{}\n{dynamic_error:?}", String::from_utf8(buffer).unwrap());
         }
     }
 }
@@ -332,12 +332,25 @@ fn test_arrays() {
                 i = 4
                 print_int(items[i])
                 print_int(result)
+                let floats Array<float, 2>
+                floats[0] = 1.5
+                floats[1] = 0.5
+                print_float(floats[0] + floats[1])
+                let bools Array<bool, 3>
+                bools[0] = false
+                bools[1] = true
+                bools[2] = false
+                if bools[1] {
+                    print_int(1)
+                }
             }
         "#,
         r#"
             4
             5
             20
+            2
+            1
         "#,
     )
 }

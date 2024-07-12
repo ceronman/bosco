@@ -233,11 +233,30 @@ impl Compiler {
                         }
                         func.instruction(&Instruction::I32Const(addr as i32));
                         self.expression(func, value)?;
-                        func.instruction(&Instruction::I32Store(MemArg {
-                            offset: offset as u64,
-                            align: 2, // TODO: Do properly
-                            memory_index: 0,
-                        }));
+                        let instruction = match self.expression_types.get(&value.node.id) {
+                            Some(Ty::Int) => Instruction::I32Store(MemArg {
+                                offset: offset as u64,
+                                align: 2,
+                                memory_index: 0,
+                            }),
+                            Some(Ty::Float) => Instruction::F64Store(MemArg {
+                                offset: offset as u64,
+                                align: 3,
+                                memory_index: 0,
+                            }),
+                            Some(Ty::Bool) => Instruction::I32Store8(MemArg {
+                                offset: offset as u64,
+                                align: 0,
+                                memory_index: 0,
+                            }),
+                            _ => {
+                                return compile_error(
+                                    "Can't store expression in Array",
+                                    value.node.span,
+                                )
+                            }
+                        };
+                        func.instruction(&instruction);
                     }
                 }
             }
@@ -357,7 +376,7 @@ impl Compiler {
                     (BinOpKind::Le, Ty::Float) => func.instruction(&Instruction::F64Le),
 
                     (BinOpKind::Add, Ty::Int) => func.instruction(&Instruction::I32Add),
-                    (BinOpKind::Add, Ty::Float) => func.instruction(&Instruction::I32Add),
+                    (BinOpKind::Add, Ty::Float) => func.instruction(&Instruction::F64Add),
 
                     (BinOpKind::Sub, Ty::Int) => func.instruction(&Instruction::I32Sub),
                     (BinOpKind::Sub, Ty::Float) => func.instruction(&Instruction::F64Sub),
@@ -434,21 +453,44 @@ impl Compiler {
                     Address::None => {}
                 }
             }
-            ExprKind::ArrayIndex { expr, index } => {
-                let Some(Ty::Array(inner, _)) = self.expression_types.get(&expr.node.id) else {
-                    return compile_error("Fatal: Expression is not an array", expr.node.span);
+            ExprKind::ArrayIndex {
+                expr: array_expr,
+                index,
+            } => {
+                let Some(Ty::Array(inner, _)) =
+                    self.expression_types.get(&array_expr.node.id).cloned()
+                else {
+                    return compile_error(
+                        "Fatal: Expression is not an array",
+                        array_expr.node.span,
+                    );
                 };
                 let size = inner.size() as i32;
-                self.expression(func, expr)?;
+                self.expression(func, array_expr)?;
                 func.instruction(&Instruction::I32Const(size));
                 self.expression(func, index)?;
                 func.instruction(&Instruction::I32Mul);
                 func.instruction(&Instruction::I32Add);
-                func.instruction(&Instruction::I32Load(MemArg {
-                    offset: 0,
-                    align: 2,
-                    memory_index: 0,
-                }));
+
+                let load_instruction = match *inner {
+                    Ty::Int => Instruction::I32Load(MemArg {
+                        offset: 0,
+                        align: 2,
+                        memory_index: 0,
+                    }),
+                    Ty::Float => Instruction::F64Load(MemArg {
+                        offset: 0,
+                        align: 3,
+                        memory_index: 0,
+                    }),
+                    Ty::Bool => Instruction::I32Load8S(MemArg {
+                        offset: 0,
+                        align: 0,
+                        memory_index: 0,
+                    }),
+                    _ => return compile_error("Unsupported type of array", expr.node.span),
+                };
+                func.instruction(&load_instruction);
             }
             ExprKind::Call { callee, args } => {
                 let name = match &callee.kind {
