@@ -218,9 +218,6 @@ impl Compiler {
                         let ExprKind::Variable(name) = &expr.kind else {
                             return compile_error("Unsupported array assignment", stmt.node.span);
                         };
-                        let ExprKind::Literal(LiteralKind::Int(index)) = index.kind else {
-                            return compile_error("Unsupported array index", index.node.span);
-                        };
                         let local = self.symbol_table.lookup_var(name)?;
                         let Address::Mem(addr) = local.address else {
                             todo!("Fixme!");
@@ -229,29 +226,25 @@ impl Compiler {
                         let Ty::Array(inner, _size) = &local.ty else {
                             todo!("Fixme!");
                         };
-                        let offset = inner.size() * index as u32;
-                        match **inner {
-                            Ty::Void => {}
-                            Ty::Int => {}
-                            Ty::Float => {}
-                            Ty::Bool => {}
-                            Ty::Array(_, _) => todo!("Fixme!"),
-                        }
                         func.instruction(&Instruction::I32Const(addr as i32));
+                        self.expression(func, index)?;
+                        func.instruction(&Instruction::I32Const(inner.size() as i32));
+                        func.instruction(&Instruction::I32Mul);
+                        func.instruction(&Instruction::I32Add);
                         self.expression(func, value)?;
                         let instruction = match self.expression_types.get(&value.node.id) {
                             Some(Ty::Int) => Instruction::I32Store(MemArg {
-                                offset: offset as u64,
+                                offset: 0,
                                 align: 2,
                                 memory_index: 0,
                             }),
                             Some(Ty::Float) => Instruction::F64Store(MemArg {
-                                offset: offset as u64,
+                                offset: 0,
                                 align: 3,
                                 memory_index: 0,
                             }),
                             Some(Ty::Bool) => Instruction::I32Store8(MemArg {
-                                offset: offset as u64,
+                                offset: 0,
                                 align: 0,
                                 memory_index: 0,
                             }),

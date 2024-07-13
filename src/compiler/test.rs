@@ -332,6 +332,9 @@ fn test_arrays() {
                 i = 4
                 print_int(items[i])
                 print_int(result)
+                i = 2
+                items[i + 1] = 100
+                print_int(items[i + 1])
                 let floats Array<float, 2>
                 floats[0] = 1.5
                 floats[1] = 0.5
@@ -349,6 +352,7 @@ fn test_arrays() {
             4
             5
             20
+            100
             2
             1
         "#,
@@ -395,14 +399,26 @@ fn assert_error(annotated_source: &str) {
         Ok(_) => panic!("No error returned"),
         Err(dynamic_error) => {
             if let Some(e) = dynamic_error.downcast_ref::<CompileError>() {
-                assert_eq!(format!("CompileError: {}", e.msg), message);
                 if !range.is_empty() {
-                    assert_eq!((e.span.0)..(e.span.1), range)
+                    let expected = e.span.0..e.span.1;
+                    if expected != range {
+                        panic!("Ranges don't match\n\tExpected:\t{expected:?}\n\tActual:\t\t{range:?}\n\n{dynamic_error:?}")
+                    }
+                }
+                let expected = format!("CompileError: {}", e.msg);
+                if expected != message {
+                    panic!("Errors don't match\n\tExpected:\t{expected}\n\tActual:\t\t{message}\n\n{dynamic_error:?}")
                 }
             } else if let Some(e) = dynamic_error.downcast_ref::<ParseError>() {
-                assert_eq!(format!("ParseError: {}", e.msg), message);
                 if !range.is_empty() {
-                    assert_eq!((e.span.0)..(e.span.1), range)
+                    let expected = e.span.0..e.span.1;
+                    if expected != range {
+                        panic!("Ranges don't match\n\tExpected:\t{expected:?}\n\tActual:\t\t{range:?}\n\n{dynamic_error:?}")
+                    }
+                }
+                let expected = format!("ParseError: {}", e.msg);
+                if expected != message {
+                    panic!("Errors don't match\n\tExpected:\t{expected}\n\tActual:\t\t{message}\n\n{dynamic_error:?}")
                 }
             } else {
                 panic!("Unknown error {dynamic_error:?}")
@@ -618,6 +634,16 @@ fn test_type_errors() {
             let a int = 1
             a[1] = 2
           //^ CompileError: Expecting an Array, found Int
+        }
+        "#,
+    );
+
+    assert_error(
+        r#"
+        export fn main() {
+            let a Array<int, 5>
+            a[true or false]
+            //^^^^^^^^^^^^^ CompileError: Array index must be Int
         }
         "#,
     );

@@ -114,7 +114,11 @@ impl Compiler {
                 let local_var = self.symbol_table.lookup_var(ident)?;
                 local_var.ty.clone()
             }
-            ExprKind::ArrayIndex { expr, .. } => {
+            ExprKind::ArrayIndex { expr, index } => {
+                let index_ty = self.type_check_expr(index)?;
+                if index_ty != Ty::Int {
+                    return compile_error("Array index must be Int", index.node.span);
+                }
                 let expr_ty = self.type_check_expr(expr)?;
                 let Ty::Array(inner, _) = expr_ty else {
                     return compile_error(
