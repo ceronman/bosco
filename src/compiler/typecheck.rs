@@ -1,8 +1,8 @@
 use anyhow::Result;
 
 use crate::ast::{
-    AssignTargetKind, BinOpKind, Expr, ExprKind, Function, Item, ItemKind, LiteralKind, Module,
-    Stmt, StmtKind, UnOpKind,
+    BinOpKind, Expr, ExprKind, Function, Item, ItemKind, LiteralKind, Module, Stmt, StmtKind,
+    UnOpKind,
 };
 use crate::compiler::{compile_error, Compiler, Ty};
 
@@ -51,18 +51,7 @@ impl Compiler {
                 }
             }
             StmtKind::Assignment { target, value } => {
-                let var_ty = match &target.kind {
-                    AssignTargetKind::Variable(name) => {
-                        self.symbol_table.lookup_var(name)?.ty.clone()
-                    }
-                    AssignTargetKind::Array { name, .. } => {
-                        let array_ty = &self.symbol_table.lookup_var(name)?.ty;
-                        let Ty::Array(inner, _) = array_ty else {
-                            return compile_error(format!("The type '{array_ty:?}' cannot be indexed because it's not an array"), name.node.span);
-                        };
-                        (**inner).clone()
-                    }
-                };
+                let var_ty = self.type_check_expr(target)?;
                 let initializer_ty = self.type_check_expr(value)?;
                 if initializer_ty != var_ty {
                     return compile_error(

@@ -5,8 +5,8 @@ use std::rc::Rc;
 use anyhow::Result;
 
 use crate::ast::{
-    AssignTargetKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, Module, NodeId, Param,
-    Stmt, StmtKind, Symbol,
+    Expr, ExprKind, Function, Identifier, Item, ItemKind, Module, NodeId, Param, Stmt, StmtKind,
+    Symbol,
 };
 use crate::compiler::{compile_error, Counter, Ty};
 use crate::lexer::Span;
@@ -235,11 +235,7 @@ impl SymbolTable {
             }
 
             StmtKind::Assignment { target, value } => {
-                match &target.kind {
-                    AssignTargetKind::Variable(name) | AssignTargetKind::Array { name, .. } => {
-                        self.resolve_var(name)?
-                    }
-                };
+                self.resolve_expression(target)?;
                 self.resolve_expression(value)?;
             }
 

@@ -1,15 +1,13 @@
 #[cfg(test)]
 mod test;
 
-use crate::ast::StmtKind::ExprStmt;
+use crate::ast::StmtKind::{Assignment, ExprStmt};
 use crate::ast::{
-    AssignTarget, AssignTargetKind, BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item,
-    ItemKind, LiteralKind, Module, Node, NodeId, Param, Stmt, StmtKind, Symbol, Type, TypeParam,
-    UnOp, UnOpKind,
+    BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module,
+    Node, NodeId, Param, Stmt, StmtKind, Symbol, Type, TypeParam, UnOp, UnOpKind,
 };
 use crate::lexer::{Lexer, Span, Token, TokenKind};
 use anyhow::Result;
-use std::str::FromStr;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -163,11 +161,6 @@ impl<'src> Parser<'src> {
             TokenKind::If => self.if_statement(),
             TokenKind::While => self.while_statement(),
             TokenKind::Return => self.return_statement(),
-            TokenKind::Identifier
-                if matches!(self.peek().kind, TokenKind::Equal | TokenKind::LBracket) =>
-            {
-                self.assignment()
-            }
             _ => self.expr_stmt(),
         }
     }
@@ -383,15 +376,6 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn number<T: FromStr>(&mut self, token: Token) -> Result<T> {
-        let value = token.span.as_str(self.source);
-        let result: T = value.parse().map_err(|_| ParseError {
-            msg: format!("Unable to parse number {value}"),
-            span: token.span,
-        })?;
-        Ok(result)
-    }
-
     fn variable(&mut self) -> Result<Expr> {
         let name =
             self.identifier(|t| format!("Expected variable name, found {:?} instead", t.kind))?;
@@ -401,42 +385,24 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn assignment(&mut self) -> Result<Stmt> {
-        let target = self.assign_target()?;
-        self.expect(TokenKind::Equal)?;
-        let value = self.expression()?;
-        Ok(Stmt {
-            node: self.node(target.node.span, value.node.span),
-            kind: StmtKind::Assignment { target, value },
-        })
-    }
-
-    fn assign_target(&mut self) -> Result<AssignTarget> {
-        let name =
-            self.identifier(|t| format!("Expected variable name, found {:?} instead", t.kind))?;
-        let result = if self.eat(TokenKind::LBracket) {
-            let index_token = self.expect(TokenKind::Int)?;
-            let index: u32 = self.number(index_token)?;
-            let rbracket = self.expect(TokenKind::RBracket)?;
-            AssignTarget {
-                node: self.node(name.node.span, rbracket.span),
-                kind: AssignTargetKind::Array { name, index },
-            }
-        } else {
-            AssignTarget {
-                node: self.node(name.node.span, name.node.span),
-                kind: AssignTargetKind::Variable(name),
-            }
-        };
-        Ok(result)
-    }
-
     fn expr_stmt(&mut self) -> Result<Stmt> {
         let expr = self.expression()?;
-        Ok(Stmt {
-            node: self.node(expr.node.span, expr.node.span),
-            kind: ExprStmt(expr),
-        })
+
+        if self.eat(TokenKind::Equal) {
+            let value = self.expression()?;
+            Ok(Stmt {
+                node: self.node(expr.node.span, value.node.span),
+                kind: Assignment {
+                    target: expr,
+                    value,
+                },
+            })
+        } else {
+            Ok(Stmt {
+                node: self.node(expr.node.span, expr.node.span),
+                kind: ExprStmt(expr),
+            })
+        }
     }
 
     fn declaration(&mut self) -> Result<Stmt> {
@@ -522,9 +488,9 @@ impl<'src> Parser<'src> {
         while self.eat(TokenKind::Eol) {}
     }
 
-    fn peek(&self) -> Token {
-        self.lexer.clone().next_non_trivial_token()
-    }
+    // fn peek(&self) -> Token {
+    //     self.lexer.clone().next_non_trivial_token()
+    // }
 
     fn advance(&mut self) {
         self.token = self.lexer.next_non_trivial_token();

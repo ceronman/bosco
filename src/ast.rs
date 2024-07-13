@@ -81,7 +81,7 @@ pub enum StmtKind {
         value: Option<Expr>,
     },
     Assignment {
-        target: AssignTarget,
+        target: Expr,
         value: Expr,
     },
     If {
@@ -96,18 +96,6 @@ pub enum StmtKind {
     Return {
         expr: Expr,
     },
-}
-
-#[derive(Debug)]
-pub struct AssignTarget {
-    pub node: Node,
-    pub kind: AssignTargetKind,
-}
-
-#[derive(Debug)]
-pub enum AssignTargetKind {
-    Variable(Identifier),
-    Array { name: Identifier, index: u32 },
 }
 
 #[derive(Debug)]

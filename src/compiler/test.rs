@@ -355,6 +355,22 @@ fn test_arrays() {
     )
 }
 
+#[test]
+fn test_nested_arrays() {
+    program_test(
+        r#"
+            export fn main() {
+                let nested Array<Array<int, 4>, 3>
+                nested[0][0] = 100
+                print_int(nested[0][0])
+            }
+        "#,
+        r#"
+
+        "#,
+    )
+}
+
 fn assert_error(annotated_source: &str) {
     let error_re = Regex::new(r"^\s*//\s*(\^*)\s+(.*)\n$").unwrap();
     let mut offset = 0;
@@ -601,7 +617,7 @@ fn test_type_errors() {
         export fn main() {
             let a int = 1
             a[1] = 2
-          //^ CompileError: The type 'Int' cannot be indexed because it's not an array
+          //^ CompileError: Expecting an Array, found Int
         }
         "#,
     );

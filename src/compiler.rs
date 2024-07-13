@@ -11,8 +11,8 @@ use wasm_encoder::{
 
 use crate::ast;
 use crate::ast::{
-    AssignTargetKind, BinOpKind, Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId,
-    Stmt, StmtKind, Symbol, TypeParam, UnOpKind,
+    BinOpKind, Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind,
+    Symbol, TypeParam, UnOpKind,
 };
 use crate::compiler::resolution::{Address, FnSignature, SymbolTable};
 use crate::lexer::Span;
@@ -206,7 +206,7 @@ impl Compiler {
 
             StmtKind::Assignment { target, value } => {
                 match &target.kind {
-                    AssignTargetKind::Variable(name) => {
+                    ExprKind::Variable(name) => {
                         let local = self.symbol_table.lookup_var(name)?;
                         let Address::Var(index) = local.address else {
                             todo!("Fixme!")
@@ -214,7 +214,13 @@ impl Compiler {
                         self.expression(func, value)?;
                         func.instruction(&Instruction::LocalSet(index));
                     }
-                    AssignTargetKind::Array { name, index } => {
+                    ExprKind::ArrayIndex { expr, index } => {
+                        let ExprKind::Variable(name) = &expr.kind else {
+                            return compile_error("Unsupported array assignment", stmt.node.span);
+                        };
+                        let ExprKind::Literal(LiteralKind::Int(index)) = index.kind else {
+                            return compile_error("Unsupported array index", index.node.span);
+                        };
                         let local = self.symbol_table.lookup_var(name)?;
                         let Address::Mem(addr) = local.address else {
                             todo!("Fixme!");
@@ -223,7 +229,7 @@ impl Compiler {
                         let Ty::Array(inner, _size) = &local.ty else {
                             todo!("Fixme!");
                         };
-                        let offset = inner.size() * index;
+                        let offset = inner.size() * index as u32;
                         match **inner {
                             Ty::Void => {}
                             Ty::Int => {}
@@ -257,6 +263,9 @@ impl Compiler {
                             }
                         };
                         func.instruction(&instruction);
+                    }
+                    _ => {
+                        return compile_error("Unsupported left side of assignment", stmt.node.span)
                     }
                 }
             }

@@ -4,8 +4,8 @@ use std::str::Chars;
 use ariadne::{Label, Report, ReportKind, Source};
 
 use crate::ast::{
-    AssignTarget, AssignTargetKind, BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item,
-    ItemKind, LiteralKind, Module, Param, Stmt, StmtKind, Type, TypeParam, UnOp, UnOpKind,
+    BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module,
+    Param, Stmt, StmtKind, Type, TypeParam, UnOp, UnOpKind,
 };
 use crate::parser::{parse, ParseError};
 
@@ -114,15 +114,6 @@ impl SExpr for Stmt {
             StmtKind::Return { expr } => {
                 format!("(return {})", expr.s_expr())
             }
-        }
-    }
-}
-
-impl SExpr for AssignTarget {
-    fn s_expr(&self) -> String {
-        match &self.kind {
-            AssignTargetKind::Variable(name) => name.s_expr(),
-            AssignTargetKind::Array { name, index } => format!("{}[{index}]", name.s_expr()),
         }
     }
 }
