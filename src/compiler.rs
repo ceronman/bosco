@@ -209,22 +209,22 @@ impl Compiler {
                     ExprKind::Variable(name) => {
                         let local = self.symbol_table.lookup_var(name)?;
                         let Address::Var(index) = local.address else {
-                            todo!("Fixme!")
+                            return compile_error("Panic: invalid address for variable", name.node.span);
                         };
                         self.expression(func, value)?;
                         func.instruction(&Instruction::LocalSet(index));
                     }
                     ExprKind::ArrayIndex { expr, index } => {
                         let ExprKind::Variable(name) = &expr.kind else {
-                            return compile_error("Unsupported array assignment", stmt.node.span);
+                            return compile_error("Panic: invalid array", stmt.node.span);
                         };
                         let local = self.symbol_table.lookup_var(name)?;
                         let Address::Mem(addr) = local.address else {
-                            todo!("Fixme!");
+                            return compile_error("Panic: invalid address for variable", name.node.span);
                         };
                         // TODO: Check bounds
                         let Ty::Array(inner, _size) = &local.ty else {
-                            todo!("Fixme!");
+                            return compile_error("Panic: trying to index something that is not an array", name.node.span);
                         };
                         func.instruction(&Instruction::I32Const(addr as i32));
                         self.expression(func, index)?;
