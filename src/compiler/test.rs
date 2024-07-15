@@ -370,7 +370,7 @@ fn test_nested_arrays() {
             }
         "#,
         r#"
-
+        100
         "#,
     )
 }

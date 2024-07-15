@@ -204,64 +204,49 @@ impl Compiler {
                 }
             }
 
-            StmtKind::Assignment { target, value } => {
-                match &target.kind {
-                    ExprKind::Variable(name) => {
-                        let local = self.symbol_table.lookup_var(name)?;
-                        let Address::Var(index) = local.address else {
-                            return compile_error("Panic: invalid address for variable", name.node.span);
-                        };
-                        self.expression(func, value)?;
-                        func.instruction(&Instruction::LocalSet(index));
-                    }
-                    ExprKind::ArrayIndex { expr, index } => {
-                        let ExprKind::Variable(name) = &expr.kind else {
-                            return compile_error("Panic: invalid array", stmt.node.span);
-                        };
-                        let local = self.symbol_table.lookup_var(name)?;
-                        let Address::Mem(addr) = local.address else {
-                            return compile_error("Panic: invalid address for variable", name.node.span);
-                        };
-                        // TODO: Check bounds
-                        let Ty::Array(inner, _size) = &local.ty else {
-                            return compile_error("Panic: trying to index something that is not an array", name.node.span);
-                        };
-                        func.instruction(&Instruction::I32Const(addr as i32));
-                        self.expression(func, index)?;
-                        func.instruction(&Instruction::I32Const(inner.size() as i32));
-                        func.instruction(&Instruction::I32Mul);
-                        func.instruction(&Instruction::I32Add);
-                        self.expression(func, value)?;
-                        let instruction = match self.expression_types.get(&value.node.id) {
-                            Some(Ty::Int) => Instruction::I32Store(MemArg {
-                                offset: 0,
-                                align: 2,
-                                memory_index: 0,
-                            }),
-                            Some(Ty::Float) => Instruction::F64Store(MemArg {
-                                offset: 0,
-                                align: 3,
-                                memory_index: 0,
-                            }),
-                            Some(Ty::Bool) => Instruction::I32Store8(MemArg {
-                                offset: 0,
-                                align: 0,
-                                memory_index: 0,
-                            }),
-                            _ => {
-                                return compile_error(
-                                    "Can't store expression in Array",
-                                    value.node.span,
-                                )
-                            }
-                        };
-                        func.instruction(&instruction);
-                    }
-                    _ => {
-                        return compile_error("Unsupported left side of assignment", stmt.node.span)
-                    }
+            StmtKind::Assignment { target, value } => match &target.kind {
+                ExprKind::Variable(name) => {
+                    let local = self.symbol_table.lookup_var(name)?;
+                    let Address::Var(index) = local.address else {
+                        return compile_error(
+                            "Panic: invalid address for variable",
+                            name.node.span,
+                        );
+                    };
+                    self.expression(func, value)?;
+                    func.instruction(&Instruction::LocalSet(index));
                 }
-            }
+                ExprKind::ArrayIndex { expr, index } => {
+                    self.push_address(func, expr, index)?;
+                    self.expression(func, value)?;
+
+                    let instruction = match self.expression_types.get(&value.node.id) {
+                        Some(Ty::Int) => Instruction::I32Store(MemArg {
+                            offset: 0,
+                            align: 2,
+                            memory_index: 0,
+                        }),
+                        Some(Ty::Float) => Instruction::F64Store(MemArg {
+                            offset: 0,
+                            align: 3,
+                            memory_index: 0,
+                        }),
+                        Some(Ty::Bool) => Instruction::I32Store8(MemArg {
+                            offset: 0,
+                            align: 0,
+                            memory_index: 0,
+                        }),
+                        _ => {
+                            return compile_error(
+                                "Can't store expression in Array",
+                                value.node.span,
+                            )
+                        }
+                    };
+                    func.instruction(&instruction);
+                }
+                _ => return compile_error("Unsupported left side of assignment", stmt.node.span),
+            },
 
             StmtKind::If {
                 condition,
@@ -293,6 +278,52 @@ impl Compiler {
             }
         }
         Ok(())
+    }
+
+    fn push_address(
+        &mut self,
+        func: &mut wasm_encoder::Function,
+        target: &Expr,
+        index: &Expr,
+    ) -> Result<Ty> {
+        match &target.kind {
+            ExprKind::Variable(name) => {
+                let local = self.symbol_table.lookup_var(name)?;
+                let Address::Mem(addr) = local.address else {
+                    return compile_error("Panic: invalid address for variable", name.node.span);
+                };
+                // TODO: Check bounds
+                let Ty::Array(inner, _size) = local.ty.clone() else {
+                    return compile_error(
+                        "Panic: trying to index something that is not an array",
+                        name.node.span,
+                    );
+                };
+                func.instruction(&Instruction::I32Const(addr as i32));
+                self.expression(func, index)?;
+                func.instruction(&Instruction::I32Const(inner.size() as i32));
+                func.instruction(&Instruction::I32Mul);
+                func.instruction(&Instruction::I32Add);
+                Ok((*inner).clone())
+            }
+            ExprKind::ArrayIndex { expr, index } => {
+                let ty = self.push_address(func, expr, index)?;
+                // TODO: Check bounds
+                let Ty::Array(inner, _size) = &ty else {
+                    return compile_error(
+                        "Panic: trying to index something that is not an array",
+                        expr.node.span,
+                    );
+                };
+                self.expression(func, index)?;
+                func.instruction(&Instruction::I32Const(inner.size() as i32));
+                func.instruction(&Instruction::I32Mul);
+                func.instruction(&Instruction::I32Add);
+                Ok(ty.clone())
+            }
+
+            _ => todo!(),
+        }
     }
 
     fn expression(&mut self, func: &mut wasm_encoder::Function, expr: &Expr) -> Result<()> {
@@ -459,21 +490,13 @@ impl Compiler {
                 expr: array_expr,
                 index,
             } => {
-                let Some(Ty::Array(inner, _)) =
-                    self.expression_types.get(&array_expr.node.id).cloned()
-                else {
+                let ty = self.push_address(func, array_expr, index)?;
+                let Ty::Array(inner, _) = ty else {
                     return compile_error(
                         "Fatal: Expression is not an array",
                         array_expr.node.span,
                     );
                 };
-                let size = inner.size() as i32;
-                self.expression(func, array_expr)?;
-                func.instruction(&Instruction::I32Const(size));
-                self.expression(func, index)?;
-                func.instruction(&Instruction::I32Mul);
-                func.instruction(&Instruction::I32Add);
-
                 let load_instruction = match *inner {
                     Ty::Int => Instruction::I32Load(MemArg {
                         offset: 0,
