@@ -117,12 +117,12 @@ impl Compiler {
             ExprKind::ArrayIndex { expr, index } => {
                 let index_ty = self.type_check_expr(index)?;
                 if index_ty != Ty::Int {
-                    return compile_error("Array index must be Int", index.node.span);
+                    return compile_error("Type Error: Array index must be Int", index.node.span);
                 }
                 let expr_ty = self.type_check_expr(expr)?;
                 let Ty::Array(inner, _) = expr_ty else {
                     return compile_error(
-                        format!("Expecting an Array, found {expr_ty:?}"),
+                        format!("Type Error: Expecting an Array, found {expr_ty:?}"),
                         expr.node.span,
                     );
                 };

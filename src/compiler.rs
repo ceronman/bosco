@@ -309,7 +309,7 @@ impl Compiler {
             ExprKind::ArrayIndex { expr, index } => {
                 let ty = self.push_address(func, expr, index)?;
                 // TODO: Check bounds
-                let Ty::Array(inner, _size) = &ty else {
+                let Ty::Array(inner, _size) = ty else {
                     return compile_error(
                         "Panic: trying to index something that is not an array",
                         expr.node.span,
@@ -319,7 +319,7 @@ impl Compiler {
                 func.instruction(&Instruction::I32Const(inner.size() as i32));
                 func.instruction(&Instruction::I32Mul);
                 func.instruction(&Instruction::I32Add);
-                Ok(ty.clone())
+                Ok((*inner).clone())
             }
 
             _ => todo!(),
@@ -490,14 +490,8 @@ impl Compiler {
                 expr: array_expr,
                 index,
             } => {
-                let ty = self.push_address(func, array_expr, index)?;
-                let Ty::Array(inner, _) = ty else {
-                    return compile_error(
-                        "Fatal: Expression is not an array",
-                        array_expr.node.span,
-                    );
-                };
-                let load_instruction = match *inner {
+                let inner = self.push_address(func, array_expr, index)?;
+                let load_instruction = match inner {
                     Ty::Int => Instruction::I32Load(MemArg {
                         offset: 0,
                         align: 2,

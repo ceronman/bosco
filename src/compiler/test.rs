@@ -1,4 +1,3 @@
-use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
 use ariadne::{Label, Report, ReportKind, Source};
@@ -360,6 +359,22 @@ fn test_arrays() {
 }
 
 #[test]
+fn test_arrays_mini() {
+    program_test(
+        r#"
+            export fn main() {
+                let items Array<int, 5>
+                items[0] = 4
+                print_int(items[0])
+            }
+        "#,
+        r#"
+            4
+        "#,
+    )
+}
+
+#[test]
 fn test_nested_arrays() {
     program_test(
         r#"
@@ -367,59 +382,67 @@ fn test_nested_arrays() {
                 let nested Array<Array<int, 4>, 3>
                 nested[0][0] = 100
                 print_int(nested[0][0])
+
+                let nested2 Array<Array<float, 2>, 3>
+                nested2[1][1] = 1.5
+                print_float(nested2[1][1])
             }
         "#,
         r#"
         100
+        1.5
         "#,
     )
 }
 
 fn assert_error(annotated_source: &str) {
     let error_re = Regex::new(r"^\s*//\s*(\^*)\s+(.*)\n$").unwrap();
-    let mut offset = 0;
     let mut source = String::new();
-    let mut range = 0..0;
-    let mut message = String::new();
-    let mut last_len = 0;
     for line in annotated_source.split_inclusive('\n') {
-        if let Some(captures) = error_re.captures(line) {
-            let m = captures.get(1).unwrap();
-            let Range { start, end } = m.range();
-            range = (offset - last_len + start)..(offset - last_len + end);
-            message.push_str(&captures[2]);
-        } else {
+        if error_re.captures(line).is_none() {
             source.push_str(line);
-            offset += line.len();
-            last_len = line.len();
         }
+    }
+
+    fn annotate_result(source: String, span: crate::lexer::Span, msg: String) -> String {
+        let mut result = String::new();
+        let mut offset = 0;
+        let mut annotated = false;
+        for line in source.split_inclusive('\n') {
+            result.push_str(line);
+            if !annotated && offset + line.len() > span.0 {
+                let start = span.0 - offset - 2;
+                let len = span.1 - span.0;
+                let annotation = format!("{}//{} {}\n", " ".repeat(start), "^".repeat(len), msg,);
+                result.push_str(&annotation);
+                annotated = true
+            }
+            offset += line.len();
+        }
+        // if !annotated {
+        //     let annotation = format!(
+        //         "// {msg}\n",
+        //     );
+        //     result.push_str(&annotation);
+        // }
+        result
     }
 
     match compile(&source) {
         Ok(_) => panic!("No error returned"),
         Err(dynamic_error) => {
             if let Some(e) = dynamic_error.downcast_ref::<CompileError>() {
-                if !range.is_empty() {
-                    let expected = e.span.0..e.span.1;
-                    if expected != range {
-                        panic!("Ranges don't match\n\tExpected:\t{expected:?}\n\tActual:\t\t{range:?}\n\n{dynamic_error:?}")
-                    }
+                let result = annotate_result(source, e.span, format!("CompileError: {}", e.msg));
+                if result != annotated_source {
+                    eprintln!("{dynamic_error:?}");
                 }
-                let expected = format!("CompileError: {}", e.msg);
-                if expected != message {
-                    panic!("Errors don't match\n\tExpected:\t{expected}\n\tActual:\t\t{message}\n\n{dynamic_error:?}")
-                }
+                assert_eq!(result, annotated_source);
             } else if let Some(e) = dynamic_error.downcast_ref::<ParseError>() {
-                if !range.is_empty() {
-                    let expected = e.span.0..e.span.1;
-                    if expected != range {
-                        panic!("Ranges don't match\n\tExpected:\t{expected:?}\n\tActual:\t\t{range:?}\n\n{dynamic_error:?}")
-                    }
+                let result = annotate_result(source, e.span, format!("ParseError: {}", e.msg));
+                if result != annotated_source {
+                    eprintln!("{dynamic_error:?}");
                 }
-                let expected = format!("ParseError: {}", e.msg);
-                if expected != message {
-                    panic!("Errors don't match\n\tExpected:\t{expected}\n\tActual:\t\t{message}\n\n{dynamic_error:?}")
-                }
+                assert_eq!(result, annotated_source);
             } else {
                 panic!("Unknown error {dynamic_error:?}")
             }
@@ -428,7 +451,7 @@ fn assert_error(annotated_source: &str) {
 }
 
 #[test]
-fn test_errors() {
+fn test_function_call_argument_check() {
     assert_error(
         r#"
         export fn main() {
@@ -436,13 +459,20 @@ fn test_errors() {
           //^^^^^^^ CompileError: The 'print' function requires a single argument
         }"#,
     );
+}
+
+#[test]
+fn test_parse_error_expected_closing_paren() {
     assert_error(
         r#"
         export fn main() {
             print(
-                // ParseError: Expected expression, got Eof
-        "#,
+// ParseError: Expected expression, got Eof"#,
     );
+}
+
+#[test]
+fn test_undeclared_var() {
     assert_error(
         r#"
         export fn main() {
@@ -450,14 +480,22 @@ fn test_errors() {
           //^ CompileError: Undeclared variable 'x'
         }"#,
     );
+}
+
+#[test]
+fn test_already_declared_var() {
     assert_error(
         r#"
         export fn main() {
             let x int = 1
             let x int = 2
-        //      ^ CompileError: Variable 'x' was already declared in this scope
+              //^ CompileError: Variable 'x' was already declared in this scope
         }"#,
     );
+}
+
+#[test]
+fn test_parse_missing_explicit_type() {
     assert_error(
         r#"
         export fn main() {
@@ -465,7 +503,10 @@ fn test_errors() {
                 //^ ParseError: Expected type, found Equal instead
         }"#,
     );
+}
 
+#[test]
+fn test_duplicate_function() {
     assert_error(
         r#"
         export fn main() {
@@ -476,7 +517,10 @@ fn test_errors() {
          //^^^ CompileError: Function 'foo' was already defined
         "#,
     );
+}
 
+#[test]
+fn test_duplicate_function_from_export() {
     assert_error(
         r#"
         export fn main() {
@@ -489,7 +533,7 @@ fn test_errors() {
 }
 
 #[test]
-fn test_type_errors() {
+fn test_assignment_type_mismatch() {
     assert_error(
         r#"
         export fn main() {
@@ -497,7 +541,10 @@ fn test_type_errors() {
                         //^ CompileError: Type Error: expected Float but found Int
         }"#,
     );
+}
 
+#[test]
+fn test_assignment_type_mismatch_2() {
     assert_error(
         r#"
         export fn main() {
@@ -506,7 +553,10 @@ fn test_type_errors() {
                         //^ CompileError: Type Error: expected Float but found Int
         }"#,
     );
+}
 
+#[test]
+fn test_binary_operation_type_mismatch() {
     assert_error(
         r#"
         export fn main() {
@@ -516,7 +566,10 @@ fn test_type_errors() {
                       //^^^^^ CompileError: Type Error: operator Add has incompatible types Int and Float
         }"#,
     );
+}
 
+#[test]
+fn test_type_mismatch_in_if() {
     assert_error(
         r#"
         export fn main() {
@@ -527,7 +580,10 @@ fn test_type_errors() {
             }
         }"#,
     );
+}
 
+#[test]
+fn test_modulo_type_mismatch() {
     assert_error(
         r#"
         export fn main() {
@@ -537,7 +593,10 @@ fn test_type_errors() {
                       //^^^^^ CompileError: Type Error: operator Mod has incompatible types Int and Float
         }"#,
     );
+}
 
+#[test]
+fn test_module_type_mismatch_2() {
     assert_error(
         r#"
         export fn main() {
@@ -547,7 +606,10 @@ fn test_type_errors() {
                       //^^^^^ CompileError: Type Error: '%' operator doesn't work on floats
         }"#,
     );
+}
 
+#[test]
+fn test_function_call_arg_type_mismatch() {
     assert_error(
         r#"
         export fn main() {
@@ -555,7 +617,10 @@ fn test_type_errors() {
                     //^^^ CompileError: Type Error: argument type mismatch
         }"#,
     );
+}
 
+#[test]
+fn function_call_arg_type_mismatch_2() {
     assert_error(
         r#"
         export fn main() {
@@ -563,7 +628,10 @@ fn test_type_errors() {
                       //^ CompileError: Type Error: argument type mismatch
         }"#,
     );
+}
 
+#[test]
+fn test_condition_type_mismatch() {
     assert_error(
         r#"
         export fn main() {
@@ -574,7 +642,10 @@ fn test_type_errors() {
             }
         }"#,
     );
+}
 
+#[test]
+fn test_while_condition_type_mismatch() {
     assert_error(
         r#"
         export fn main() {
@@ -584,7 +655,10 @@ fn test_type_errors() {
             }
         }"#,
     );
+}
 
+#[test]
+fn test_logical_operator_type_mismatch() {
     assert_error(
         r#"
         export fn main() {
@@ -597,7 +671,10 @@ fn test_type_errors() {
             }
         }"#,
     );
+}
 
+#[test]
+fn test_return_type_mismatch() {
     assert_error(
         r#"
         export fn main() {
@@ -605,7 +682,10 @@ fn test_type_errors() {
           //^^^^^^^^ CompileError: Type Error: return type mismatch, expected Void, but found Int
         }"#,
     );
+}
 
+#[test]
+fn test_return_type_mismatch_2() {
     assert_error(
         r#"
         export fn main() {
@@ -618,32 +698,70 @@ fn test_type_errors() {
         }
         "#,
     );
+}
+
+#[test]
+fn test_array_index_type_mismatch() {
     assert_error(
         r#"
         export fn main() {
             let a int = 1
             let b int = a[1]
-                      //^ CompileError: Expecting an Array, found Int
+                      //^ CompileError: Type Error: Expecting an Array, found Int
         }
         "#,
     );
+}
 
+#[test]
+fn test_array_index_assignment_type_mismatch() {
     assert_error(
         r#"
         export fn main() {
             let a int = 1
             a[1] = 2
-          //^ CompileError: Expecting an Array, found Int
+          //^ CompileError: Type Error: Expecting an Array, found Int
         }
         "#,
     );
+}
 
+#[test]
+fn test_array_indexing_expression_type_mismatch() {
     assert_error(
         r#"
         export fn main() {
             let a Array<int, 5>
             a[true or false]
-            //^^^^^^^^^^^^^ CompileError: Array index must be Int
+            //^^^^^^^^^^^^^ CompileError: Type Error: Array index must be Int
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_nested_array_assignment_type_mismatch() {
+    assert_error(
+        r#"
+        export fn main() {
+            let a Array<Array<float, 2>, 5>
+            a[0][0] = true
+                    //^^^^ CompileError: Type Error: expected Float but found Bool
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_nested_array_index_expr_type_mismatch() {
+    assert_error(
+        r#"
+        export fn main() {
+            let a Array<Array<float, 2>, 2>
+            if a[0][0] {
+             //^^^^^^^ CompileError: Type Error: condition should be 'bool', but got Float
+                print("it worked")
+            }
         }
         "#,
     );
