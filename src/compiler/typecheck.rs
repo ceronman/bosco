@@ -18,6 +18,8 @@ impl Compiler {
     fn type_check_item(&mut self, item: &Item) -> Result<()> {
         match &item.kind {
             ItemKind::Function(f) => self.type_check_function(f)?,
+
+            ItemKind::Record(_) => todo!(),
         }
         Ok(())
     }

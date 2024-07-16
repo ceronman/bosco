@@ -4,8 +4,8 @@ use std::str::Chars;
 use ariadne::{Label, Report, ReportKind, Source};
 
 use crate::ast::{
-    BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module,
-    Param, Stmt, StmtKind, Type, TypeParam, UnOp, UnOpKind,
+    BinOp, BinOpKind, Expr, ExprKind, Field, Function, Identifier, Item, ItemKind, LiteralKind,
+    Module, Param, Record, Stmt, StmtKind, Type, TypeParam, UnOp, UnOpKind,
 };
 use crate::parser::{parse, ParseError};
 
@@ -42,6 +42,10 @@ impl SExpr for Item {
                     body.s_expr()
                 )
             }
+
+            ItemKind::Record(Record { name, fields }) => {
+                format!("(record {} {})", name.s_expr(), fields.s_expr())
+            }
         }
     }
 }
@@ -49,6 +53,12 @@ impl SExpr for Item {
 impl SExpr for Param {
     fn s_expr(&self) -> String {
         format!("(param {} {})", self.name.s_expr(), self.ty.s_expr())
+    }
+}
+
+impl SExpr for Field {
+    fn s_expr(&self) -> String {
+        format!("(field {} {})", self.name.s_expr(), self.ty.s_expr())
     }
 }
 
@@ -569,5 +579,17 @@ fn test_types() {
         (let z map<string int>)
         (let a set)
         (let b Array<int 5>)
+    }
+}
+
+#[test]
+fn test_record() {
+    test_parser! {
+        r#"
+            record Point(x int, y int)
+        "#,
+        (module
+            (record Point (field x int) (field y int))
+        )
     }
 }

@@ -172,6 +172,8 @@ impl Compiler {
                 ItemKind::Function(function) => {
                     self.function(function)?;
                 }
+
+                ItemKind::Record(_) => todo!(),
             }
         }
         Ok(())

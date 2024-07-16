@@ -140,6 +140,8 @@ impl SymbolTable {
             ItemKind::Function(function) => {
                 self.resolve_function(function)?;
             }
+
+            ItemKind::Record(_) => todo!(),
         }
         Ok(())
     }

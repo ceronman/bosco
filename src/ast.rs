@@ -44,6 +44,12 @@ pub struct Item {
 }
 
 #[derive(Debug)]
+pub enum ItemKind {
+    Function(Function),
+    Record(Record),
+}
+
+#[derive(Debug)]
 pub struct Function {
     pub exported: bool,
     pub name: Identifier,
@@ -53,8 +59,15 @@ pub struct Function {
 }
 
 #[derive(Debug)]
-pub enum ItemKind {
-    Function(Function),
+pub struct Record {
+    pub name: Identifier,
+    pub fields: Vec<Field>,
+}
+
+#[derive(Debug)]
+pub struct Field {
+    pub name: Identifier,
+    pub ty: Type,
 }
 
 #[derive(Debug)]

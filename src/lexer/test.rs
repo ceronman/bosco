@@ -278,3 +278,17 @@ fn functions() {
         true,
     );
 }
+
+#[test]
+fn records() {
+    test_lexer(
+        r#"
+        record Foo(x int, y int)
+    "#,
+        vec![
+            Eol, Record, Identifier, LParen, Identifier, Identifier, Comma, Identifier, Identifier,
+            RParen, Eol,
+        ],
+        true,
+    );
+}

@@ -3,8 +3,8 @@ mod test;
 
 use crate::ast::StmtKind::{Assignment, ExprStmt};
 use crate::ast::{
-    BinOp, BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module,
-    Node, NodeId, Param, Stmt, StmtKind, Symbol, Type, TypeParam, UnOp, UnOpKind,
+    BinOp, BinOpKind, Expr, ExprKind, Field, Function, Identifier, Item, ItemKind, LiteralKind,
+    Module, Node, NodeId, Param, Record, Stmt, StmtKind, Symbol, Type, TypeParam, UnOp, UnOpKind,
 };
 use crate::lexer::{Lexer, Span, Token, TokenKind};
 use anyhow::Result;
@@ -54,6 +54,7 @@ impl<'src> Parser<'src> {
     fn item(&mut self) -> Result<Item> {
         match self.token.kind {
             TokenKind::Fn | TokenKind::Export => self.function(),
+            TokenKind::Record => self.record(),
             other => self.parse_error(format!("Expected declaration, got {other:?}")),
         }
     }
@@ -91,6 +92,29 @@ impl<'src> Parser<'src> {
                 params,
                 body,
             }),
+        })
+    }
+
+    fn record(&mut self) -> Result<Item> {
+        let record_keyword = self.expect(TokenKind::Record)?;
+        let name =
+            self.identifier(|t| format!("Expected record name, found {:?} instead", t.kind))?;
+        self.expect(TokenKind::LParen)?;
+        let mut fields = Vec::new();
+        if self.token.kind != TokenKind::RParen {
+            loop {
+                self.maybe_eol();
+                fields.push(self.field()?);
+
+                if !self.eat(TokenKind::Comma) {
+                    break;
+                }
+            }
+        }
+        let rparen = self.expect(TokenKind::RParen)?;
+        Ok(Item {
+            node: self.node(record_keyword.span, rparen.span),
+            kind: ItemKind::Record(Record { name, fields }),
         })
     }
 
@@ -151,6 +175,13 @@ impl<'src> Parser<'src> {
             self.identifier(|t| format!("Expected param name, found {:?} instead", t.kind))?;
         let ty = self.ty()?;
         Ok(Param { name, ty })
+    }
+
+    fn field(&mut self) -> Result<Field> {
+        let name =
+            self.identifier(|t| format!("Expected field name, found {:?} instead", t.kind))?;
+        let ty = self.ty()?;
+        Ok(Field { name, ty })
     }
 
     fn statement(&mut self) -> Result<Stmt> {

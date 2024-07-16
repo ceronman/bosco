@@ -44,6 +44,7 @@ pub enum TokenKind {
     Else,
     While,
     Fn,
+    Record,
     Export,
     Return,
 
@@ -238,6 +239,7 @@ impl<'src> Lexer<'src> {
             "else" => TokenKind::Else,
             "while" => TokenKind::While,
             "fn" => TokenKind::Fn,
+            "record" => TokenKind::Record,
             "export" => TokenKind::Export,
             "return" => TokenKind::Return,
             "or" => TokenKind::Or,
