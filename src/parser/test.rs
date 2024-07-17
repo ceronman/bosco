@@ -586,7 +586,10 @@ fn test_types() {
 fn test_record() {
     test_parser! {
         r#"
-            record Point(x int, y int)
+            record Point {
+                x int
+                y int
+            }
         "#,
         (module
             (record Point (field x int) (field y int))

@@ -99,19 +99,14 @@ impl<'src> Parser<'src> {
         let record_keyword = self.expect(TokenKind::Record)?;
         let name =
             self.identifier(|t| format!("Expected record name, found {:?} instead", t.kind))?;
-        self.expect(TokenKind::LParen)?;
+        self.expect(TokenKind::LBrace)?;
         let mut fields = Vec::new();
-        if self.token.kind != TokenKind::RParen {
-            loop {
-                self.maybe_eol();
-                fields.push(self.field()?);
-
-                if !self.eat(TokenKind::Comma) {
-                    break;
-                }
-            }
+        while self.token.kind != TokenKind::RBrace {
+            self.maybe_eol();
+            fields.push(self.field()?);
+            self.maybe_eol();
         }
-        let rparen = self.expect(TokenKind::RParen)?;
+        let rparen = self.expect(TokenKind::RBrace)?;
         Ok(Item {
             node: self.node(record_keyword.span, rparen.span),
             kind: ItemKind::Record(Record { name, fields }),
