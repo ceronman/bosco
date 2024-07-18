@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use anyhow::{bail, Result};
-use thiserror::Error;
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
     FunctionSection, ImportSection, Instruction, MemArg, MemorySection, MemoryType, TypeSection,
@@ -15,6 +13,7 @@ use crate::ast::{
     Symbol, TypeParam, UnOpKind,
 };
 use crate::compiler::resolution::{Address, FnSignature, SymbolTable};
+use crate::error::{error, CompilerResult};
 use crate::lexer::Span;
 use crate::parser::parse;
 
@@ -30,13 +29,6 @@ struct WasmStr {
     len: u32,
 }
 
-#[derive(Error, Debug)]
-#[error("Compilation Error: {msg} at {span:?}")]
-pub struct CompileError {
-    msg: String,
-    span: Span,
-}
-
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum Ty {
     Void,
@@ -47,7 +39,7 @@ pub enum Ty {
 }
 
 impl Ty {
-    fn from_ast(ast_ty: &ast::Type) -> Result<Ty> {
+    fn from_ast(ast_ty: &ast::Type) -> CompilerResult<Ty> {
         // TODO: check no type parameters for primitives
         let name = ast_ty.name.symbol.as_str();
         match name {
@@ -58,21 +50,21 @@ impl Ty {
             "Array" => {
                 let mut params = ast_ty.params.iter();
                 let Some(TypeParam::Type(inner)) = params.next() else {
-                    return compile_error(
-                        "Array requires a valid inner type parameter",
+                    return Err(error!(
                         ast_ty.node.span,
-                    );
+                        "Array requires a valid inner type parameter",
+                    ));
                 };
                 let Some(TypeParam::Const(size)) = params.next() else {
-                    return compile_error(
-                        "Array requires a valid size type parameter",
+                    return Err(error!(
                         ast_ty.node.span,
-                    );
+                        "Array requires a valid size type parameter",
+                    ));
                 };
                 let inner = Ty::from_ast(inner)?;
                 Ok(Ty::Array(Rc::from(inner), *size))
             }
-            _ => compile_error(format!("Unknown type {name}"), ast_ty.node.span),
+            _ => Err(error!(ast_ty.node.span, "Unknown type {name}")),
         }
     }
 
@@ -86,11 +78,14 @@ impl Ty {
         }
     }
 
-    fn as_wasm(&self) -> Result<ValType> {
+    fn as_wasm(&self) -> CompilerResult<ValType> {
         match self {
             Ty::Int | Ty::Bool | Ty::Array(_, _) => Ok(ValType::I32),
             Ty::Float => Ok(ValType::F64),
-            _ => bail!("{self:?} type does not have a wasm equivalent"),
+            _ => Err(error!(
+                Span(0, 0),
+                "{self:?} type does not have a wasm equivalent"
+            )),
         }
     }
 }
@@ -125,7 +120,7 @@ struct Compiler {
 impl Compiler {
     const MEM: u32 = 0;
 
-    fn function(&mut self, function: &Function) -> Result<()> {
+    fn function(&mut self, function: &Function) -> CompilerResult<()> {
         // Declare type
         let mut params = Vec::new();
         for param in &function.params {
@@ -147,7 +142,7 @@ impl Compiler {
             .locals
             .iter()
             .map(Ty::as_wasm)
-            .collect::<Result<Vec<_>>>()?
+            .collect::<CompilerResult<Vec<_>>>()?
             .into_iter()
             .map(|t| (1, t));
         let mut wasm_function = wasm_encoder::Function::new(locals);
@@ -166,7 +161,7 @@ impl Compiler {
         Ok(())
     }
 
-    fn module(&mut self, module: &Module) -> Result<()> {
+    fn module(&mut self, module: &Module) -> CompilerResult<()> {
         for item in &module.items {
             match &item.kind {
                 ItemKind::Function(function) => {
@@ -179,7 +174,7 @@ impl Compiler {
         Ok(())
     }
 
-    fn statement(&mut self, func: &mut wasm_encoder::Function, stmt: &Stmt) -> Result<()> {
+    fn statement(&mut self, func: &mut wasm_encoder::Function, stmt: &Stmt) -> CompilerResult<()> {
         match &stmt.kind {
             StmtKind::Block { statements } => {
                 for statement in statements {
@@ -210,10 +205,10 @@ impl Compiler {
                 ExprKind::Variable(name) => {
                     let local = self.symbol_table.lookup_var(name)?;
                     let Address::Var(index) = local.address else {
-                        return compile_error(
-                            "Panic: invalid address for variable",
+                        return Err(error!(
                             name.node.span,
-                        );
+                            "Panic: invalid address for variable",
+                        ));
                     };
                     self.expression(func, value)?;
                     func.instruction(&Instruction::LocalSet(index));
@@ -239,15 +234,17 @@ impl Compiler {
                             memory_index: 0,
                         }),
                         _ => {
-                            return compile_error(
-                                "Can't store expression in Array",
-                                value.node.span,
-                            )
+                            return Err(error!(value.node.span, "Can't store expression in Array",))
                         }
                     };
                     func.instruction(&instruction);
                 }
-                _ => return compile_error("Unsupported left side of assignment", stmt.node.span),
+                _ => {
+                    return Err(error!(
+                        stmt.node.span,
+                        "Unsupported left side of assignment"
+                    ))
+                }
             },
 
             StmtKind::If {
@@ -287,19 +284,22 @@ impl Compiler {
         func: &mut wasm_encoder::Function,
         target: &Expr,
         index: &Expr,
-    ) -> Result<Ty> {
+    ) -> CompilerResult<Ty> {
         match &target.kind {
             ExprKind::Variable(name) => {
                 let local = self.symbol_table.lookup_var(name)?;
                 let Address::Mem(addr) = local.address else {
-                    return compile_error("Panic: invalid address for variable", name.node.span);
+                    return Err(error!(
+                        name.node.span,
+                        "Panic: invalid address for variable"
+                    ));
                 };
                 // TODO: Check bounds
                 let Ty::Array(inner, _size) = local.ty.clone() else {
-                    return compile_error(
-                        "Panic: trying to index something that is not an array",
+                    return Err(error!(
                         name.node.span,
-                    );
+                        "Panic: trying to index something that is not an array",
+                    ));
                 };
                 func.instruction(&Instruction::I32Const(addr as i32));
                 self.expression(func, index)?;
@@ -312,10 +312,10 @@ impl Compiler {
                 let ty = self.push_address(func, expr, index)?;
                 // TODO: Check bounds
                 let Ty::Array(inner, _size) = ty else {
-                    return compile_error(
-                        "Panic: trying to index something that is not an array",
+                    return Err(error!(
                         expr.node.span,
-                    );
+                        "Panic: trying to index something that is not an array",
+                    ));
                 };
                 self.expression(func, index)?;
                 func.instruction(&Instruction::I32Const(inner.size() as i32));
@@ -328,7 +328,7 @@ impl Compiler {
         }
     }
 
-    fn expression(&mut self, func: &mut wasm_encoder::Function, expr: &Expr) -> Result<()> {
+    fn expression(&mut self, func: &mut wasm_encoder::Function, expr: &Expr) -> CompilerResult<()> {
         match &expr.kind {
             ExprKind::Literal(LiteralKind::Int(value)) => {
                 func.instruction(&Instruction::I32Const(*value));
@@ -388,7 +388,10 @@ impl Compiler {
                 self.expression(func, right)?;
 
                 let Some(ty) = self.expression_types.get(&left.node.id) else {
-                    return compile_error("Fatal: Not type found for expression", left.node.span);
+                    return Err(error!(
+                        left.node.span,
+                        "Fatal: Not type found for expression"
+                    ));
                 };
 
                 match (&operator.kind, ty) {
@@ -425,13 +428,10 @@ impl Compiler {
                     (BinOpKind::Mod, Ty::Int) => func.instruction(&Instruction::I32RemS),
 
                     _ => {
-                        return compile_error(
-                            format!(
-                                "Operator '{:?}' is not supported for type {ty:?}",
-                                operator.kind
-                            ),
+                        return Err(error!(
                             operator.node.span,
-                        )
+                            "Operator '{:?}' is not supported for type {ty:?}", operator.kind
+                        ))
                     }
                 };
             }
@@ -447,10 +447,10 @@ impl Compiler {
                 }
                 UnOpKind::Neg => {
                     let Some(ty) = self.expression_types.get(&right.node.id) else {
-                        return compile_error(
-                            "Fatal: Not type found for expression",
+                        return Err(error!(
                             right.node.span,
-                        );
+                            "Fatal: Not type found for expression",
+                        ));
                     };
 
                     match ty {
@@ -465,13 +465,10 @@ impl Compiler {
                         }
 
                         _ => {
-                            return compile_error(
-                                format!(
-                                    "Operator '{:?}' is not supported for type {ty:?}",
-                                    operator.kind
-                                ),
+                            return Err(error!(
                                 operator.node.span,
-                            )
+                                "Operator '{:?}' is not supported for type {ty:?}", operator.kind
+                            ))
                         }
                     }
                 }
@@ -509,7 +506,7 @@ impl Compiler {
                         align: 0,
                         memory_index: 0,
                     }),
-                    _ => return compile_error("Unsupported type of array", expr.node.span),
+                    _ => return Err(error!(expr.node.span, "Unsupported type of array")),
                 };
                 func.instruction(&load_instruction);
             }
@@ -517,10 +514,10 @@ impl Compiler {
                 let name = match &callee.kind {
                     ExprKind::Variable(ident) => ident,
                     _ => {
-                        return compile_error(
-                            "First class functions are not supported",
+                        return Err(error!(
                             callee.node.span,
-                        )
+                            "First class functions are not supported",
+                        ))
                     }
                 };
 
@@ -531,14 +528,14 @@ impl Compiler {
                     return if let ExprKind::Literal(LiteralKind::String(_)) = &arg.kind {
                         self.expression(func, arg)?; // Needed to add the string value to data
                         let Some(was_str) = self.strings.get(&arg.node.id) else {
-                            return compile_error("String constant not found", arg.node.span);
+                            return Err(error!(arg.node.span, "String constant not found"));
                         };
                         func.instruction(&Instruction::I32Const(was_str.offset as i32));
                         func.instruction(&Instruction::I32Const(was_str.len as i32));
                         func.instruction(&Instruction::Call(signature.index));
                         Ok(())
                     } else {
-                        compile_error("Incorrect arguments for 'print'!", expr.node.span)
+                        Err(error!(expr.node.span, "Incorrect arguments for 'print'!"))
                     };
                 }
 
@@ -552,7 +549,7 @@ impl Compiler {
         Ok(())
     }
 
-    fn import_functions(&mut self) -> Result<()> {
+    fn import_functions(&mut self) -> CompilerResult<()> {
         self.import_function("js", "print", &[Ty::Int, Ty::Int], Ty::Void)?;
         self.import_function("js", "print_int", &[Ty::Int], Ty::Void)?;
         self.import_function("js", "print_float", &[Ty::Float], Ty::Void)
@@ -564,9 +561,12 @@ impl Compiler {
         name: &'static str,
         params: &[Ty],
         return_ty: Ty,
-    ) -> Result<()> {
+    ) -> CompilerResult<()> {
         let type_idx = self.types.len();
-        let wasm_params = params.iter().map(Ty::as_wasm).collect::<Result<Vec<_>>>()?;
+        let wasm_params = params
+            .iter()
+            .map(Ty::as_wasm)
+            .collect::<CompilerResult<Vec<_>>>()?;
         let returns: &[ValType] = if return_ty == Ty::Void {
             &[]
         } else {
@@ -592,7 +592,7 @@ impl Compiler {
         self.exports.export("memory", ExportKind::Memory, 0);
     }
 
-    fn encode_wasm(&mut self) -> Result<Vec<u8>> {
+    fn encode_wasm(&mut self) -> CompilerResult<Vec<u8>> {
         let mut wasm_module = wasm_encoder::Module::new();
         wasm_module.section(&self.types);
         wasm_module.section(&self.imports);
@@ -604,7 +604,7 @@ impl Compiler {
         Ok(wasm_module.finish())
     }
 
-    fn compile(&mut self, module: &Module) -> Result<Vec<u8>> {
+    fn compile(&mut self, module: &Module) -> CompilerResult<Vec<u8>> {
         self.import_functions()?;
         self.export_memory();
         self.symbol_table.resolve(module)?;
@@ -614,15 +614,7 @@ impl Compiler {
     }
 }
 
-fn compile_error<T>(msg: impl Into<String>, span: Span) -> Result<T> {
-    Err(CompileError {
-        msg: msg.into(),
-        span,
-    }
-    .into())
-}
-
-pub fn compile(source: &str) -> Result<Vec<u8>> {
+pub fn compile(source: &str) -> CompilerResult<Vec<u8>> {
     let module = parse(source)?;
     let mut compiler = Compiler::default();
     compiler.compile(&module)

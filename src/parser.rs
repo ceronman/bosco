@@ -1,21 +1,13 @@
-#[cfg(test)]
-mod test;
-
 use crate::ast::StmtKind::{Assignment, ExprStmt};
 use crate::ast::{
     BinOp, BinOpKind, Expr, ExprKind, Field, Function, Identifier, Item, ItemKind, LiteralKind,
     Module, Node, NodeId, Param, Record, Stmt, StmtKind, Symbol, Type, TypeParam, UnOp, UnOpKind,
 };
+use crate::error::{parse_error, CompilerResult};
 use crate::lexer::{Lexer, Span, Token, TokenKind};
-use anyhow::Result;
-use thiserror::Error;
 
-#[derive(Error, Debug)]
-#[error("Parse Error: {msg} at {span:?}")]
-pub struct ParseError {
-    pub msg: String,
-    pub span: Span,
-}
+#[cfg(test)]
+mod test;
 
 struct Parser<'src> {
     source: &'src str,
@@ -35,7 +27,7 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn parse(&mut self) -> Result<Module> {
+    fn parse(&mut self) -> CompilerResult<Module> {
         let mut items = Vec::new();
         while self.token.kind != TokenKind::Eof {
             self.maybe_eol();
@@ -51,15 +43,18 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn item(&mut self) -> Result<Item> {
+    fn item(&mut self) -> CompilerResult<Item> {
         match self.token.kind {
             TokenKind::Fn | TokenKind::Export => self.function(),
             TokenKind::Record => self.record(),
-            other => self.parse_error(format!("Expected declaration, got {other:?}")),
+            other => Err(parse_error!(
+                self.token.span,
+                "Expected declaration, got {other:?}"
+            )),
         }
     }
 
-    fn function(&mut self) -> Result<Item> {
+    fn function(&mut self) -> CompilerResult<Item> {
         let exported = self.eat(TokenKind::Export);
         let fn_keyword = self.expect(TokenKind::Fn)?;
         let name =
@@ -95,7 +90,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn record(&mut self) -> Result<Item> {
+    fn record(&mut self) -> CompilerResult<Item> {
         let record_keyword = self.expect(TokenKind::Record)?;
         let name =
             self.identifier(|t| format!("Expected record name, found {:?} instead", t.kind))?;
@@ -113,7 +108,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn identifier(&mut self, msg: impl Fn(Token) -> String) -> Result<Identifier> {
+    fn identifier(&mut self, msg: impl Fn(Token) -> String) -> CompilerResult<Identifier> {
         let token = self.expect_msg(TokenKind::Identifier, msg)?;
         let symbol = token.span.as_str(self.source).into();
         Ok(Identifier {
@@ -122,7 +117,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn ty(&mut self) -> Result<Type> {
+    fn ty(&mut self) -> CompilerResult<Type> {
         let name = self.identifier(|t| format!("Expected type, found {:?} instead", t.kind))?;
         let mut end = name.node.span;
         let mut params = Vec::new();
@@ -146,40 +141,42 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn type_parameter(&mut self) -> Result<TypeParam> {
+    fn type_parameter(&mut self) -> CompilerResult<TypeParam> {
         let token = self.token;
         let param = match token.kind {
             TokenKind::Identifier => TypeParam::Type(Box::new(self.ty()?)),
             TokenKind::Int => {
                 // TODO: Duplicate with literal int parsing
                 let value = token.span.as_str(self.source);
-                let value: u32 = value.parse().map_err(|e| ParseError {
-                    msg: format!("Unable to parse const type parameter {value}: {e}"),
-                    span: token.span,
+                let value: u32 = value.parse().map_err(|e| {
+                    parse_error!(
+                        token.span,
+                        "Unable to parse const type parameter {value}: {e}"
+                    )
                 })?;
                 self.advance();
                 TypeParam::Const(value)
             }
-            _ => return self.parse_error("Expected type parameter"),
+            _ => return Err(parse_error!(self.token.span, "Expected type parameter")),
         };
         Ok(param)
     }
 
-    fn param(&mut self) -> Result<Param> {
+    fn param(&mut self) -> CompilerResult<Param> {
         let name =
             self.identifier(|t| format!("Expected param name, found {:?} instead", t.kind))?;
         let ty = self.ty()?;
         Ok(Param { name, ty })
     }
 
-    fn field(&mut self) -> Result<Field> {
+    fn field(&mut self) -> CompilerResult<Field> {
         let name =
             self.identifier(|t| format!("Expected field name, found {:?} instead", t.kind))?;
         let ty = self.ty()?;
         Ok(Field { name, ty })
     }
 
-    fn statement(&mut self) -> Result<Stmt> {
+    fn statement(&mut self) -> CompilerResult<Stmt> {
         self.maybe_eol();
         match self.token.kind {
             TokenKind::LBrace => self.block(),
@@ -191,7 +188,7 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn expression_precedence(&mut self, min_precedence: u8) -> Result<Expr> {
+    fn expression_precedence(&mut self, min_precedence: u8) -> CompilerResult<Expr> {
         let mut prefix = match self.token.kind {
             TokenKind::LParen => self.grouping()?,
             TokenKind::Str
@@ -203,7 +200,10 @@ impl<'src> Parser<'src> {
             TokenKind::Not | TokenKind::Minus => self.unary_expr()?,
 
             other_kind => {
-                return self.parse_error(format!("Expected expression, got {other_kind:?}"))
+                return Err(parse_error!(
+                    self.token.span,
+                    "Expected expression, got {other_kind:?}"
+                ))
             }
         };
 
@@ -225,16 +225,16 @@ impl<'src> Parser<'src> {
         Ok(prefix)
     }
 
-    fn grouping(&mut self) -> Result<Expr> {
+    fn grouping(&mut self) -> CompilerResult<Expr> {
         self.expect(TokenKind::LParen)?;
         let inner = self.expression()?;
         self.expect(TokenKind::RParen)?;
         Ok(inner)
     }
 
-    fn unary_expr(&mut self) -> Result<Expr> {
+    fn unary_expr(&mut self) -> CompilerResult<Expr> {
         let Some(precedence) = self.prefix_precedence() else {
-            return self.parse_error("Unknown infix precedence");
+            return Err(parse_error!(self.token.span, "Unknown infix precedence"));
         };
         let operator = self.unary_operator()?;
         let right = self.expression_precedence(precedence)?;
@@ -247,7 +247,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn call(&mut self, prefix: Expr) -> Result<Expr> {
+    fn call(&mut self, prefix: Expr) -> CompilerResult<Expr> {
         self.expect(TokenKind::LParen)?;
         let mut args = Vec::new();
         if self.token.kind != TokenKind::RParen {
@@ -270,7 +270,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn array_index(&mut self, prefix: Expr) -> Result<Expr> {
+    fn array_index(&mut self, prefix: Expr) -> CompilerResult<Expr> {
         self.expect(TokenKind::LBracket)?;
         self.maybe_eol();
         let index = self.expression()?;
@@ -284,7 +284,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn binary_expr(&mut self, prefix: Expr, precedence: u8) -> Result<Expr> {
+    fn binary_expr(&mut self, prefix: Expr, precedence: u8) -> CompilerResult<Expr> {
         let operator = self.binary_operator()?;
         let right = self.expression_precedence(precedence + 1)?;
         Ok(Expr {
@@ -297,7 +297,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn binary_operator(&mut self) -> Result<BinOp> {
+    fn binary_operator(&mut self) -> CompilerResult<BinOp> {
         let op = self.token;
         let kind = match op.kind {
             TokenKind::Plus => BinOpKind::Add,
@@ -313,7 +313,12 @@ impl<'src> Parser<'src> {
             TokenKind::GreaterEqual => BinOpKind::Ge,
             TokenKind::And => BinOpKind::And,
             TokenKind::Or => BinOpKind::Or,
-            _ => return self.parse_error(format!("Invalid binary operator {op:?}")),
+            _ => {
+                return Err(parse_error!(
+                    self.token.span,
+                    "Invalid binary operator {op:?}"
+                ))
+            }
         };
         self.advance();
         Ok(BinOp {
@@ -322,12 +327,17 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn unary_operator(&mut self) -> Result<UnOp> {
+    fn unary_operator(&mut self) -> CompilerResult<UnOp> {
         let op = self.token;
         let kind = match op.kind {
             TokenKind::Minus => UnOpKind::Neg,
             TokenKind::Not => UnOpKind::Not,
-            _ => return self.parse_error(format!("Invalid unary operator {op:?}")),
+            _ => {
+                return Err(parse_error!(
+                    self.token.span,
+                    "Invalid unary operator {op:?}"
+                ))
+            }
         };
         self.advance();
         Ok(UnOp {
@@ -362,11 +372,11 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn expression(&mut self) -> Result<Expr> {
+    fn expression(&mut self) -> CompilerResult<Expr> {
         self.expression_precedence(0)
     }
 
-    fn literal(&mut self) -> Result<Expr> {
+    fn literal(&mut self) -> CompilerResult<Expr> {
         let token = self.token;
         let kind = match token.kind {
             TokenKind::True => ExprKind::Literal(LiteralKind::Bool(true)),
@@ -379,21 +389,25 @@ impl<'src> Parser<'src> {
             }
             TokenKind::Int => {
                 let value = token.span.as_str(self.source);
-                let value: i32 = value.parse().map_err(|e| ParseError {
-                    msg: format!("Unable to parse integer {value}: {e}"),
-                    span: token.span,
+                let value: i32 = value.parse().map_err(|e| {
+                    parse_error!(token.span, "Unable to parse integer {value}: {e}")
                 })?;
                 ExprKind::Literal(LiteralKind::Int(value))
             }
             TokenKind::Float => {
                 let value = token.span.as_str(self.source);
-                let value: f64 = value.parse().map_err(|e| ParseError {
-                    msg: format!("Unable to parse float {value}: {e}"),
-                    span: token.span,
-                })?;
+                let value: f64 = value
+                    .parse()
+                    .map_err(|e| parse_error!(token.span, "Unable to parse float {value}: {e}"))?;
                 ExprKind::Literal(LiteralKind::Float(value))
             }
-            _ => return self.parse_error(format!("Expected literal, got {:?}", token.kind)),
+            _ => {
+                return Err(parse_error!(
+                    self.token.span,
+                    "Expected literal, got {:?}",
+                    token.kind
+                ))
+            }
         };
         self.advance();
         Ok(Expr {
@@ -402,7 +416,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn variable(&mut self) -> Result<Expr> {
+    fn variable(&mut self) -> CompilerResult<Expr> {
         let name =
             self.identifier(|t| format!("Expected variable name, found {:?} instead", t.kind))?;
         Ok(Expr {
@@ -411,7 +425,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn expr_stmt(&mut self) -> Result<Stmt> {
+    fn expr_stmt(&mut self) -> CompilerResult<Stmt> {
         let expr = self.expression()?;
 
         if self.eat(TokenKind::Equal) {
@@ -431,7 +445,7 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn declaration(&mut self) -> Result<Stmt> {
+    fn declaration(&mut self) -> CompilerResult<Stmt> {
         let let_kw = self.expect(TokenKind::Let)?;
         let name =
             self.identifier(|t| format!("Expected variable name, found {:?} instead", t.kind))?;
@@ -449,7 +463,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn if_statement(&mut self) -> Result<Stmt> {
+    fn if_statement(&mut self) -> CompilerResult<Stmt> {
         let if_kw = self.expect(TokenKind::If)?;
         let condition = self.expression()?;
         let then_block = self.block()?;
@@ -472,7 +486,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn block(&mut self) -> Result<Stmt> {
+    fn block(&mut self) -> CompilerResult<Stmt> {
         let lbrace = self.expect(TokenKind::LBrace)?;
         self.maybe_eol();
         let mut statements = Vec::new();
@@ -488,7 +502,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn while_statement(&mut self) -> Result<Stmt> {
+    fn while_statement(&mut self) -> CompilerResult<Stmt> {
         let while_kw = self.expect(TokenKind::While)?;
         let condition = self.expression()?;
         let body = self.block()?;
@@ -501,7 +515,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn return_statement(&mut self) -> Result<Stmt> {
+    fn return_statement(&mut self) -> CompilerResult<Stmt> {
         let return_kw = self.expect(TokenKind::Return)?;
         let expr = self.expression()?;
         Ok(Stmt {
@@ -531,7 +545,7 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn expect(&mut self, token_kind: TokenKind) -> Result<Token> {
+    fn expect(&mut self, token_kind: TokenKind) -> CompilerResult<Token> {
         self.expect_msg(token_kind, |token| {
             format!("Expected token {:?}, got {:?}", token_kind, token.kind)
         })
@@ -541,22 +555,14 @@ impl<'src> Parser<'src> {
         &mut self,
         token_kind: TokenKind,
         msg: impl Fn(Token) -> String,
-    ) -> Result<Token> {
+    ) -> CompilerResult<Token> {
         let token = self.token;
         if token.kind == token_kind {
             self.advance();
             return Ok(token);
         }
 
-        self.parse_error(msg(token))
-    }
-
-    fn parse_error<T>(&self, msg: impl Into<String>) -> Result<T> {
-        Err(ParseError {
-            msg: msg.into(),
-            span: self.token.span,
-        }
-        .into())
+        Err(parse_error!(self.token.span, "{}", msg(token)))
     }
 
     fn node(&mut self, start: Span, end: Span) -> Node {
@@ -569,7 +575,7 @@ impl<'src> Parser<'src> {
     }
 }
 
-pub fn parse(src: &str) -> Result<Module> {
+pub fn parse(src: &str) -> CompilerResult<Module> {
     let mut parser = Parser::new(src);
     parser.parse()
 }

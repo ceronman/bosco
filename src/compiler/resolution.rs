@@ -2,13 +2,12 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
-use anyhow::Result;
-
 use crate::ast::{
     Expr, ExprKind, Function, Identifier, Item, ItemKind, Module, NodeId, Param, Stmt, StmtKind,
     Symbol,
 };
-use crate::compiler::{compile_error, Counter, Ty};
+use crate::compiler::{Counter, Ty};
+use crate::error::{error, CompilerError, CompilerResult};
 use crate::lexer::Span;
 
 #[derive(Debug)]
@@ -45,25 +44,19 @@ pub(super) struct SymbolTable {
 }
 
 impl SymbolTable {
-    fn declare(&mut self, ident: &Identifier, ty: Ty) -> Result<()> {
+    fn declare(&mut self, ident: &Identifier, ty: Ty) -> CompilerResult<()> {
         let Some(env) = self.environments.front_mut() else {
-            return compile_error(
-                format!(
-                    "Variable '{}' was declared outside of any scope",
-                    ident.symbol
-                ),
+            return Err(error!(
                 ident.node.span,
-            );
+                "Variable '{}' was declared outside of any scope", ident.symbol
+            ));
         };
 
         if env.contains_key(&ident.symbol) {
-            return compile_error(
-                format!(
-                    "Variable '{}' was already declared in this scope",
-                    ident.symbol
-                ),
+            return Err(error!(
                 ident.node.span,
-            );
+                "Variable '{}' was already declared in this scope", ident.symbol
+            ));
         }
 
         let address = match &ty {
@@ -87,36 +80,33 @@ impl SymbolTable {
         Ok(())
     }
 
-    fn resolve_var(&mut self, ident: &Identifier) -> Result<()> {
+    fn resolve_var(&mut self, ident: &Identifier) -> CompilerResult<()> {
         for env in &self.environments {
             if let Some(local_var) = env.get(&ident.symbol) {
                 self.locals.insert(ident.node.id, Rc::clone(local_var));
                 return Ok(());
             }
         }
-        compile_error(
-            format!("Undeclared variable '{}'", ident.symbol),
+        Err(error!(
             ident.node.span,
-        )
+            "Undeclared variable '{}'", ident.symbol
+        ))
     }
 
-    pub(super) fn lookup_var(&self, ident: &Identifier) -> Result<LocalVarRef> {
+    pub(super) fn lookup_var(&self, ident: &Identifier) -> CompilerResult<LocalVarRef> {
         let Some(local) = self.locals.get(&ident.node.id) else {
-            return compile_error(
-                format!("Undeclared variable '{}'", ident.symbol),
+            return Err(error!(
                 ident.node.span,
-            );
+                "Undeclared variable '{}'", ident.symbol
+            ));
         };
         Ok(Rc::clone(local))
     }
 
-    pub(super) fn lookup_function(&self, name: &Identifier) -> Result<Rc<FnSignature>> {
+    pub(super) fn lookup_function(&self, name: &Identifier) -> CompilerResult<Rc<FnSignature>> {
         match self.functions.get(&name.symbol) {
             Some(f) => Ok(Rc::clone(f)),
-            None => compile_error(
-                format!("Unknown function '{}'", name.symbol),
-                name.node.span,
-            ),
+            None => Err(error!(name.node.span, "Unknown function '{}'", name.symbol)),
         }
     }
 
@@ -128,14 +118,14 @@ impl SymbolTable {
         self.environments.pop_front();
     }
 
-    pub(super) fn resolve(&mut self, module: &Module) -> Result<()> {
+    pub(super) fn resolve(&mut self, module: &Module) -> CompilerResult<()> {
         for item in &module.items {
             self.resolve_item(item)?;
         }
         Ok(())
     }
 
-    pub(super) fn resolve_item(&mut self, item: &Item) -> Result<()> {
+    pub(super) fn resolve_item(&mut self, item: &Item) -> CompilerResult<()> {
         match &item.kind {
             ItemKind::Function(function) => {
                 self.resolve_function(function)?;
@@ -151,7 +141,7 @@ impl SymbolTable {
         name: Symbol,
         params: &[Ty],
         return_ty: Ty,
-    ) -> Result<()> {
+    ) -> CompilerResult<()> {
         let signature = Rc::new(FnSignature {
             params: params.into(),
             return_ty,
@@ -161,10 +151,11 @@ impl SymbolTable {
 
         match self.functions.entry(name) {
             Entry::Occupied(e) => {
-                return compile_error(
-                    format!("Imported function '{}' has already been declared", e.key()),
+                return Err(error!(
                     Span(0, 0), // TODO: Imported functions should be defined in source code eventually
-                );
+                    "Imported function '{}' has already been declared",
+                    e.key(),
+                ));
             }
             Entry::Vacant(v) => v.insert(signature),
         };
@@ -172,7 +163,7 @@ impl SymbolTable {
         Ok(())
     }
 
-    fn resolve_function(&mut self, function: &Function) -> Result<()> {
+    fn resolve_function(&mut self, function: &Function) -> CompilerResult<()> {
         //TODO: Ugly
         self.function_locals.clear();
 
@@ -204,10 +195,11 @@ impl SymbolTable {
 
         match self.functions.entry(name) {
             Entry::Occupied(e) => {
-                return compile_error(
-                    format!("Function '{}' was already defined", e.key()),
+                return Err(error!(
                     function.name.node.span,
-                )
+                    "Function '{}' was already defined",
+                    e.key()
+                ))
             }
             Entry::Vacant(v) => v.insert(Rc::new(signature)),
         };
@@ -215,7 +207,7 @@ impl SymbolTable {
         Ok(())
     }
 
-    fn resolve_stmt(&mut self, statement: &Stmt) -> Result<()> {
+    fn resolve_stmt(&mut self, statement: &Stmt) -> CompilerResult<()> {
         match &statement.kind {
             StmtKind::Block { statements } => {
                 self.begin_scope();
@@ -263,7 +255,7 @@ impl SymbolTable {
         Ok(())
     }
 
-    fn resolve_expression(&mut self, expr: &Expr) -> Result<()> {
+    fn resolve_expression(&mut self, expr: &Expr) -> CompilerResult<()> {
         match &expr.kind {
             ExprKind::Literal(_) => {}
             ExprKind::Variable(ident) => self.resolve_var(ident)?,

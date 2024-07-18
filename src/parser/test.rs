@@ -7,7 +7,8 @@ use crate::ast::{
     BinOp, BinOpKind, Expr, ExprKind, Field, Function, Identifier, Item, ItemKind, LiteralKind,
     Module, Param, Record, Stmt, StmtKind, Type, TypeParam, UnOp, UnOpKind,
 };
-use crate::parser::{parse, ParseError};
+use crate::error::CompilerError;
+use crate::parser::parse;
 
 trait SExpr {
     fn s_expr(&self) -> String;
@@ -230,22 +231,21 @@ impl<T: SExpr> SExpr for Option<Box<T>> {
 fn s_expr(src: &str) -> String {
     match parse(src) {
         Ok(module) => module.s_expr(),
-        Err(dynamic_error) => {
+        Err(e) => {
             let mut nice_error = Vec::new();
-            if let Some(e) = dynamic_error.downcast_ref::<ParseError>() {
-                let title = "Parse Error";
-                let message = e.msg.clone();
-                let span = e.span;
-                Report::build(ReportKind::Error, (), span.0)
-                    .with_message(title)
-                    .with_label(Label::new(span.0..span.1).with_message(message))
-                    .finish()
-                    .write(Source::from(src), &mut nice_error)
-                    .unwrap();
-            }
+            let title = "Parse Error";
+            let message = e.msg.clone();
+            let span = e.span;
+            Report::build(ReportKind::Error, (), span.0)
+                .with_message(title)
+                .with_label(Label::new(span.0..span.1).with_message(message))
+                .finish()
+                .write(Source::from(src), &mut nice_error)
+                .unwrap();
             panic!(
-                "{}\n{dynamic_error:?}",
-                String::from_utf8(nice_error).unwrap()
+                "{}\n{}",
+                String::from_utf8(nice_error).unwrap(),
+                e.backtrace
             );
         }
     }
