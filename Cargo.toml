@@ -4,11 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.86"
-thiserror = "1.0.61"
 wasm-encoder = "0.212.0"
 
 [dev-dependencies]
+anyhow = "1.0.86"
 wasmi = "0.33.1"
 wasmprinter = "0.212.0"
 ariadne = "0.4.1"
