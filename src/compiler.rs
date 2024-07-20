@@ -36,6 +36,13 @@ pub enum Ty {
     Float,
     Bool,
     Array(Rc<Ty>, u32),
+    Record(Vec<Field>),
+}
+
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub struct Field {
+    name: Symbol,
+    ty: Rc<Ty>,
 }
 
 impl Ty {
@@ -75,6 +82,7 @@ impl Ty {
             Ty::Float => 8,
             Ty::Bool => 1,
             Ty::Array(inner, length) => inner.size() * length,
+            Ty::Record(fields) => fields.iter().map(|f| f.ty.size()).sum(),
         }
     }
 

@@ -6,8 +6,8 @@ use crate::ast::{
     Expr, ExprKind, Function, Identifier, Item, ItemKind, Module, NodeId, Param, Stmt, StmtKind,
     Symbol,
 };
-use crate::compiler::{Counter, Ty};
-use crate::error::{error, CompilerError, CompilerResult};
+use crate::compiler::{Counter, Field, Ty};
+use crate::error::{error, CompilerResult};
 use crate::lexer::Span;
 
 #[derive(Debug)]
@@ -38,6 +38,7 @@ pub(super) struct SymbolTable {
     environments: VecDeque<HashMap<Symbol, LocalVarRef>>,
     locals: HashMap<NodeId, LocalVarRef>,
     functions: HashMap<Symbol, Rc<FnSignature>>,
+    types: HashMap<Symbol, Ty>,
     function_counter: Counter,
     function_locals: Vec<Ty>,
     free_address: u32,
@@ -131,7 +132,22 @@ impl SymbolTable {
                 self.resolve_function(function)?;
             }
 
-            ItemKind::Record(_) => todo!(),
+            ItemKind::Record(record) => {
+                let symbol = &record.name.symbol;
+                if self.types.contains_key(symbol) {
+                    return Err(error!(record.name.node.span, "Record already defined"));
+                }
+
+                let mut fields = Vec::new();
+                for f in &record.fields {
+                    fields.push(Field {
+                        name: f.name.symbol.clone(),
+                        ty: Ty::from_ast(&f.ty)?.into(),
+                    })
+                }
+
+                self.types.insert(symbol.clone(), Ty::Record(fields));
+            }
         }
         Ok(())
     }

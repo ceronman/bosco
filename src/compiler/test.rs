@@ -741,3 +741,22 @@ fn test_nested_array_index_expr_type_mismatch() {
         "#,
     );
 }
+
+#[test]
+fn test_duplicated_record() {
+    assert_error(
+        r#"
+        record Foo {
+            name int
+        }
+        
+        export fn main() {
+        }
+        
+        record Foo {
+             //^^^ Compiler Error: Record already defined
+            weight float
+        }
+        "#,
+    );
+}
