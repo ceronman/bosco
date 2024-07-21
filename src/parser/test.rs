@@ -7,7 +7,6 @@ use crate::ast::{
     BinOp, BinOpKind, Expr, ExprKind, Field, Function, Identifier, Item, ItemKind, LiteralKind,
     Module, Param, Record, Stmt, StmtKind, Type, TypeParam, UnOp, UnOpKind,
 };
-use crate::error::CompilerError;
 use crate::parser::parse;
 
 trait SExpr {
@@ -154,6 +153,10 @@ impl SExpr for Expr {
 
             ExprKind::ArrayIndex { expr, index } => {
                 format!("(index {} {})", expr.s_expr(), index.s_expr())
+            }
+
+            ExprKind::FieldAccess { expr, field } => {
+                format!("(get {} {})", expr.s_expr(), field.s_expr())
             }
         }
     }
@@ -594,5 +597,19 @@ fn test_record() {
         (module
             (record Point (field x int) (field y int))
         )
+    }
+}
+
+#[test]
+fn test_field_access() {
+    test_main! {
+        r#"
+            x.y = 1
+            x.y[1] = 1
+            x.y * a.b
+        "#,
+        (= (get x y) 1)
+        (= (index (get x y) 1) 1)
+        (* (get x y) (get a b))
     }
 }

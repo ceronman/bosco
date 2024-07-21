@@ -218,6 +218,7 @@ impl<'src> Parser<'src> {
             prefix = match self.token.kind {
                 TokenKind::LParen => self.call(prefix)?,
                 TokenKind::LBracket => self.array_index(prefix)?,
+                TokenKind::Dot => self.field_access(prefix)?,
                 _ => self.binary_expr(prefix, precedence)?,
             };
         }
@@ -280,6 +281,20 @@ impl<'src> Parser<'src> {
             kind: ExprKind::ArrayIndex {
                 expr: Box::new(prefix),
                 index: Box::new(index),
+            },
+        })
+    }
+
+    fn field_access(&mut self, prefix: Expr) -> CompilerResult<Expr> {
+        self.expect(TokenKind::Dot)?;
+        self.maybe_eol();
+        let field =
+            self.identifier(|t| format!("Expected field name, found {:?} instead", t.kind))?;
+        Ok(Expr {
+            node: self.node(prefix.node.span, field.node.span),
+            kind: ExprKind::FieldAccess {
+                expr: Box::new(prefix),
+                field,
             },
         })
     }
@@ -359,7 +374,8 @@ impl<'src> Parser<'src> {
     fn infix_precedence(&self) -> Option<u8> {
         use TokenKind::*;
         match self.token.kind {
-            LParen | LBracket       => Some(7),
+            Dot | LParen            => Some(8),
+            LBracket                => Some(7),
             Star | Slash | Percent  => Some(6),
             Plus | Minus            => Some(5),
             Greater | GreaterEqual

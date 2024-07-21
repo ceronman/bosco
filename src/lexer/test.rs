@@ -292,3 +292,14 @@ fn records() {
         true,
     );
 }
+
+#[test]
+fn fields() {
+    test_lexer(
+        r#"
+        x.y = 1
+    "#,
+        vec![Eol, Identifier, Dot, Identifier, Equal, Int, Eol],
+        true,
+    );
+}

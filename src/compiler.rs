@@ -481,6 +481,7 @@ impl Compiler {
                     }
                 }
             },
+
             ExprKind::Variable(ident) => {
                 let local_var = self.symbol_table.lookup_var(ident)?;
                 match local_var.address {
@@ -493,6 +494,7 @@ impl Compiler {
                     Address::None => {}
                 }
             }
+
             ExprKind::ArrayIndex {
                 expr: array_expr,
                 index,
@@ -518,6 +520,9 @@ impl Compiler {
                 };
                 func.instruction(&load_instruction);
             }
+
+            ExprKind::FieldAccess { .. } => todo!(),
+
             ExprKind::Call { callee, args } => {
                 let name = match &callee.kind {
                     ExprKind::Variable(ident) => ident,

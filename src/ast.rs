@@ -125,6 +125,10 @@ pub enum ExprKind {
         expr: Box<Expr>,
         index: Box<Expr>,
     },
+    FieldAccess {
+        expr: Box<Expr>,
+        field: Identifier,
+    },
     Unary {
         operator: UnOp,
         right: Box<Expr>,

@@ -350,22 +350,6 @@ fn test_arrays() {
 }
 
 #[test]
-fn test_arrays_mini() {
-    program_test(
-        r#"
-            export fn main() {
-                let items Array<int, 5>
-                items[0] = 4
-                print_int(items[0])
-            }
-        "#,
-        r#"
-            4
-        "#,
-    )
-}
-
-#[test]
 fn test_nested_arrays() {
     program_test(
         r#"
@@ -382,6 +366,28 @@ fn test_nested_arrays() {
         r#"
         100
         1.5
+        "#,
+    )
+}
+
+#[test]
+fn test_records() {
+    program_test(
+        r#"
+            record Point {
+                x int
+                y int
+            }
+            
+            export fn main() {
+                let p Point
+                p.x = 4
+                p.y = 5
+                print_num(p.x * p.y)
+            }
+        "#,
+        r#"
+        20
         "#,
     )
 }

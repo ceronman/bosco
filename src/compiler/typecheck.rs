@@ -133,6 +133,7 @@ impl Compiler {
                 };
                 (*inner).clone()
             }
+            ExprKind::FieldAccess { .. } => todo!(),
             ExprKind::Binary {
                 left,
                 right,

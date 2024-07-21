@@ -54,6 +54,7 @@ pub enum TokenKind {
     Whitespace,
     Eol,
     Comma,
+    Dot,
 
     UnterminatedCommentError,
     Error,
@@ -143,6 +144,7 @@ impl<'src> Lexer<'src> {
             ('[', _) => TokenKind::LBracket,
             (']', _) => TokenKind::RBracket,
             (',', _) => TokenKind::Comma,
+            ('.', _) => TokenKind::Dot,
             ('0'..='9', _) => self.number(),
             ('"', _) => self.string(),
             (c, _) if c == '_' || c.is_alphabetic() => self.identifier(),

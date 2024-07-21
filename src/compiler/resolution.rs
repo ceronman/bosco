@@ -279,6 +279,7 @@ impl SymbolTable {
                 self.resolve_expression(expr)?;
                 self.resolve_expression(index)?;
             }
+            ExprKind::FieldAccess { .. } => todo!(),
             ExprKind::Binary { left, right, .. } => {
                 self.resolve_expression(left)?;
                 self.resolve_expression(right)?;
