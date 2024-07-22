@@ -1,14 +1,14 @@
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, VecDeque};
-use std::rc::Rc;
-
+use crate::ast;
 use crate::ast::{
     Expr, ExprKind, Function, Identifier, Item, ItemKind, Module, NodeId, Param, Stmt, StmtKind,
-    Symbol,
+    Symbol, TypeParam,
 };
 use crate::compiler::{Counter, Field, Ty};
 use crate::error::{error, CompilerResult};
 use crate::lexer::Span;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, VecDeque};
+use std::rc::Rc;
 
 #[derive(Debug)]
 pub struct Local {
@@ -104,6 +104,33 @@ impl SymbolTable {
         Ok(Rc::clone(local))
     }
 
+    pub(super) fn lookup_type(&self, ast_ty: &ast::Type) -> CompilerResult<Ty> {
+        let ident = &ast_ty.name;
+        let Some(ty) = self.types.get(&ident.symbol) else {
+            // TODO: Ugly hack
+            if ident.symbol.as_str() == "Array" {
+                let mut params = ast_ty.params.iter();
+                let Some(TypeParam::Type(inner)) = params.next() else {
+                    return Err(error!(
+                        ast_ty.node.span,
+                        "Array requires a valid inner type parameter",
+                    ));
+                };
+                let Some(TypeParam::Const(size)) = params.next() else {
+                    return Err(error!(
+                        ast_ty.node.span,
+                        "Array requires a valid size type parameter",
+                    ));
+                };
+                let inner = self.lookup_type(&*inner)?;
+                return Ok(Ty::Array(Rc::from(inner), *size));
+            }
+
+            return Err(error!(ident.node.span, "Unknown type '{}'", ident.symbol));
+        };
+        Ok(ty.clone())
+    }
+
     pub(super) fn lookup_function(&self, name: &Identifier) -> CompilerResult<Rc<FnSignature>> {
         match self.functions.get(&name.symbol) {
             Some(f) => Ok(Rc::clone(f)),
@@ -119,7 +146,39 @@ impl SymbolTable {
         self.environments.pop_front();
     }
 
+    fn collect_module_types(&mut self, module: &Module) -> CompilerResult<()> {
+        // TODO: Improve prelude
+        self.types.insert(Symbol::from("void"), Ty::Void);
+        self.types.insert(Symbol::from("int"), Ty::Int);
+        self.types.insert(Symbol::from("float"), Ty::Float);
+        self.types.insert(Symbol::from("bool"), Ty::Bool);
+
+        for item in &module.items {
+            match &item.kind {
+                ItemKind::Record(record) => {
+                    let symbol = &record.name.symbol;
+                    if self.types.contains_key(symbol) {
+                        return Err(error!(record.name.node.span, "Record already defined"));
+                    }
+
+                    let mut fields = Vec::new();
+                    for f in &record.fields {
+                        fields.push(Field {
+                            name: f.name.symbol.clone(),
+                            ty: self.lookup_type(&f.ty)?.into(),
+                        })
+                    }
+
+                    self.types.insert(symbol.clone(), Ty::Record(fields));
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn resolve(&mut self, module: &Module) -> CompilerResult<()> {
+        self.collect_module_types(module)?;
         for item in &module.items {
             self.resolve_item(item)?;
         }
@@ -132,22 +191,7 @@ impl SymbolTable {
                 self.resolve_function(function)?;
             }
 
-            ItemKind::Record(record) => {
-                let symbol = &record.name.symbol;
-                if self.types.contains_key(symbol) {
-                    return Err(error!(record.name.node.span, "Record already defined"));
-                }
-
-                let mut fields = Vec::new();
-                for f in &record.fields {
-                    fields.push(Field {
-                        name: f.name.symbol.clone(),
-                        ty: Ty::from_ast(&f.ty)?.into(),
-                    })
-                }
-
-                self.types.insert(symbol.clone(), Ty::Record(fields));
-            }
+            ItemKind::Record(_) => {}
         }
         Ok(())
     }
@@ -185,7 +229,7 @@ impl SymbolTable {
 
         self.begin_scope();
         for Param { name, ty, .. } in &function.params {
-            self.declare(name, Ty::from_ast(ty)?)?;
+            self.declare(name, self.lookup_type(&ty)?)?;
         }
         self.resolve_stmt(&function.body)?;
         self.end_scope();
@@ -194,11 +238,11 @@ impl SymbolTable {
 
         let mut params = Vec::new();
         for p in &function.params {
-            params.push(Ty::from_ast(&p.ty)?);
+            params.push(self.lookup_type(&p.ty)?);
         }
 
         let return_ty = match &function.return_ty {
-            Some(t) => Ty::from_ast(t)?,
+            Some(t) => self.lookup_type(&t)?,
             None => Ty::Void,
         };
 
@@ -238,7 +282,7 @@ impl SymbolTable {
             }
 
             StmtKind::Declaration { name, ty, value } => {
-                self.declare(name, Ty::from_ast(ty)?)?;
+                self.declare(name, self.lookup_type(&ty)?)?;
                 if let Some(value) = value {
                     self.resolve_expression(value)?;
                 }

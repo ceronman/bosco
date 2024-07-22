@@ -7,10 +7,9 @@ use wasm_encoder::{
     ValType,
 };
 
-use crate::ast;
 use crate::ast::{
     BinOpKind, Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind,
-    Symbol, TypeParam, UnOpKind,
+    Symbol, UnOpKind,
 };
 use crate::compiler::resolution::{Address, FnSignature, SymbolTable};
 use crate::error::{error, CompilerResult};
@@ -46,34 +45,34 @@ pub struct Field {
 }
 
 impl Ty {
-    fn from_ast(ast_ty: &ast::Type) -> CompilerResult<Ty> {
-        // TODO: check no type parameters for primitives
-        let name = ast_ty.name.symbol.as_str();
-        match name {
-            "void" => Ok(Ty::Void),
-            "int" => Ok(Ty::Int),
-            "float" => Ok(Ty::Float),
-            "bool" => Ok(Ty::Bool),
-            "Array" => {
-                let mut params = ast_ty.params.iter();
-                let Some(TypeParam::Type(inner)) = params.next() else {
-                    return Err(error!(
-                        ast_ty.node.span,
-                        "Array requires a valid inner type parameter",
-                    ));
-                };
-                let Some(TypeParam::Const(size)) = params.next() else {
-                    return Err(error!(
-                        ast_ty.node.span,
-                        "Array requires a valid size type parameter",
-                    ));
-                };
-                let inner = Ty::from_ast(inner)?;
-                Ok(Ty::Array(Rc::from(inner), *size))
-            }
-            _ => Err(error!(ast_ty.node.span, "Unknown type {name}")),
-        }
-    }
+    // fn from_ast(ast_ty: &ast::Type) -> CompilerResult<Ty> {
+    //     // TODO: check no type parameters for primitives
+    //     let name = ast_ty.name.symbol.as_str();
+    //     match name {
+    //         "void" => Ok(Ty::Void),
+    //         "int" => Ok(Ty::Int),
+    //         "float" => Ok(Ty::Float),
+    //         "bool" => Ok(Ty::Bool),
+    //         "Array" => {
+    //             let mut params = ast_ty.params.iter();
+    //             let Some(TypeParam::Type(inner)) = params.next() else {
+    //                 return Err(error!(
+    //                     ast_ty.node.span,
+    //                     "Array requires a valid inner type parameter",
+    //                 ));
+    //             };
+    //             let Some(TypeParam::Const(size)) = params.next() else {
+    //                 return Err(error!(
+    //                     ast_ty.node.span,
+    //                     "Array requires a valid size type parameter",
+    //                 ));
+    //             };
+    //             let inner = Ty::from_ast(inner)?;
+    //             Ok(Ty::Array(Rc::from(inner), *size))
+    //         }
+    //         _ => Err(error!(ast_ty.node.span, "Unknown type {name}")),
+    //     }
+    // }
 
     fn size(&self) -> u32 {
         match self {
@@ -132,11 +131,11 @@ impl Compiler {
         // Declare type
         let mut params = Vec::new();
         for param in &function.params {
-            let ty = Ty::from_ast(&param.ty)?;
+            let ty = self.symbol_table.lookup_type(&param.ty)?;
             params.push(ty.as_wasm()?)
         }
         let returns: &[ValType] = if let Some(return_ty) = &function.return_ty {
-            &[Ty::from_ast(return_ty)?.as_wasm()?]
+            &[self.symbol_table.lookup_type(&return_ty)?.as_wasm()?]
         } else {
             &[]
         };
