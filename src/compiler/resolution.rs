@@ -61,12 +61,13 @@ impl SymbolTable {
         }
 
         let address = match &ty {
-            Ty::Array(_, _) => {
+            Ty::Array(_, _) | Ty::Record(_) => {
                 let pointer = self.free_address;
                 self.free_address += ty.size();
                 Address::Mem(pointer)
             }
             Ty::Void => Address::None,
+            // TODO: Create something like `TyPrimitive` instead of _
             _ => {
                 let index = self.function_locals.len() as u32;
                 self.function_locals.push(ty.clone());
@@ -323,7 +324,7 @@ impl SymbolTable {
                 self.resolve_expression(expr)?;
                 self.resolve_expression(index)?;
             }
-            ExprKind::FieldAccess { .. } => todo!(),
+            ExprKind::FieldAccess { expr, .. } => self.resolve_expression(expr)?,
             ExprKind::Binary { left, right, .. } => {
                 self.resolve_expression(left)?;
                 self.resolve_expression(right)?;

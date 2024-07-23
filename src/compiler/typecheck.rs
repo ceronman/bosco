@@ -17,8 +17,7 @@ impl Compiler {
     fn type_check_item(&mut self, item: &Item) -> CompilerResult<()> {
         match &item.kind {
             ItemKind::Function(f) => self.type_check_function(f)?,
-
-            ItemKind::Record(_) => todo!(),
+            ItemKind::Record(_) => {},
         }
         Ok(())
     }
@@ -133,7 +132,22 @@ impl Compiler {
                 };
                 (*inner).clone()
             }
-            ExprKind::FieldAccess { .. } => todo!(),
+            ExprKind::FieldAccess { expr, field } => {
+                let expr_ty = self.type_check_expr(expr)?;
+                let Ty::Record(fields) = expr_ty else {
+                    return Err(error!(
+                        expr.node.span,
+                        "Type Error: Expecting an Record, found {expr_ty:?}"
+                    ));
+                };
+                let Some(field) = fields.iter().find(|f| f.name == field.symbol) else {
+                    return Err(error!(
+                        expr.node.span,
+                        "Type Error: unknown field {:?}", field.symbol
+                    ));
+                };
+                (*field.ty).clone()
+            },
             ExprKind::Binary {
                 left,
                 right,

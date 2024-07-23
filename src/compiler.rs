@@ -7,10 +7,7 @@ use wasm_encoder::{
     ValType,
 };
 
-use crate::ast::{
-    BinOpKind, Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind,
-    Symbol, UnOpKind,
-};
+use crate::ast::{BinOpKind, Expr, ExprKind, Function, Identifier, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind, Symbol, UnOpKind};
 use crate::compiler::resolution::{Address, FnSignature, SymbolTable};
 use crate::error::{error, CompilerResult};
 use crate::lexer::Span;
@@ -45,35 +42,6 @@ pub struct Field {
 }
 
 impl Ty {
-    // fn from_ast(ast_ty: &ast::Type) -> CompilerResult<Ty> {
-    //     // TODO: check no type parameters for primitives
-    //     let name = ast_ty.name.symbol.as_str();
-    //     match name {
-    //         "void" => Ok(Ty::Void),
-    //         "int" => Ok(Ty::Int),
-    //         "float" => Ok(Ty::Float),
-    //         "bool" => Ok(Ty::Bool),
-    //         "Array" => {
-    //             let mut params = ast_ty.params.iter();
-    //             let Some(TypeParam::Type(inner)) = params.next() else {
-    //                 return Err(error!(
-    //                     ast_ty.node.span,
-    //                     "Array requires a valid inner type parameter",
-    //                 ));
-    //             };
-    //             let Some(TypeParam::Const(size)) = params.next() else {
-    //                 return Err(error!(
-    //                     ast_ty.node.span,
-    //                     "Array requires a valid size type parameter",
-    //                 ));
-    //             };
-    //             let inner = Ty::from_ast(inner)?;
-    //             Ok(Ty::Array(Rc::from(inner), *size))
-    //         }
-    //         _ => Err(error!(ast_ty.node.span, "Unknown type {name}")),
-    //     }
-    // }
-
     fn size(&self) -> u32 {
         match self {
             Ty::Void => 0,
@@ -87,7 +55,7 @@ impl Ty {
 
     fn as_wasm(&self) -> CompilerResult<ValType> {
         match self {
-            Ty::Int | Ty::Bool | Ty::Array(_, _) => Ok(ValType::I32),
+            Ty::Int | Ty::Bool | Ty::Array(_, _) | Ty::Record(_) => Ok(ValType::I32), // TODO: specify
             Ty::Float => Ok(ValType::F64),
             _ => Err(error!(
                 Span(0, 0),
@@ -175,7 +143,7 @@ impl Compiler {
                     self.function(function)?;
                 }
 
-                ItemKind::Record(_) => todo!(),
+                ItemKind::Record(_) => {}
             }
         }
         Ok(())
@@ -220,11 +188,12 @@ impl Compiler {
                     self.expression(func, value)?;
                     func.instruction(&Instruction::LocalSet(index));
                 }
-                ExprKind::ArrayIndex { expr, index } => {
-                    self.push_address(func, expr, index)?;
+                ExprKind::ArrayIndex { .. } | ExprKind::FieldAccess { .. } => {
+                    self.push_address(func, target)?;
                     self.expression(func, value)?;
 
                     let instruction = match self.expression_types.get(&value.node.id) {
+                        // TODO: support this via polymorphism
                         Some(Ty::Int) => Instruction::I32Store(MemArg {
                             offset: 0,
                             align: 2,
@@ -245,6 +214,8 @@ impl Compiler {
                         }
                     };
                     func.instruction(&instruction);
+                }
+                ExprKind::FieldAccess { expr, field } => {
                 }
                 _ => {
                     return Err(error!(
@@ -290,7 +261,6 @@ impl Compiler {
         &mut self,
         func: &mut wasm_encoder::Function,
         target: &Expr,
-        index: &Expr,
     ) -> CompilerResult<Ty> {
         match &target.kind {
             ExprKind::Variable(name) => {
@@ -301,22 +271,11 @@ impl Compiler {
                         "Panic: invalid address for variable"
                     ));
                 };
-                // TODO: Check bounds
-                let Ty::Array(inner, _size) = local.ty.clone() else {
-                    return Err(error!(
-                        name.node.span,
-                        "Panic: trying to index something that is not an array",
-                    ));
-                };
                 func.instruction(&Instruction::I32Const(addr as i32));
-                self.expression(func, index)?;
-                func.instruction(&Instruction::I32Const(inner.size() as i32));
-                func.instruction(&Instruction::I32Mul);
-                func.instruction(&Instruction::I32Add);
-                Ok((*inner).clone())
+                Ok(local.ty.clone())
             }
             ExprKind::ArrayIndex { expr, index } => {
-                let ty = self.push_address(func, expr, index)?;
+                let ty = self.push_address(func, expr)?;
                 // TODO: Check bounds
                 let Ty::Array(inner, _size) = ty else {
                     return Err(error!(
@@ -329,6 +288,34 @@ impl Compiler {
                 func.instruction(&Instruction::I32Mul);
                 func.instruction(&Instruction::I32Add);
                 Ok((*inner).clone())
+            }
+
+            ExprKind::FieldAccess { expr, field } => {
+                let ty = self.push_address(func, expr)?;
+                let Ty::Record(fields) = ty.clone() else {
+                    return Err(error!(
+                        field.node.span,
+                        "Panic: trying to get a field of something that is not a record",
+                    ));
+                };
+                let mut offset = 0;
+                let mut field_ty= None;
+                for f in &fields {
+                    if f.name == field.symbol {
+                        field_ty = Some(f.ty.clone());
+                        break
+                    }
+                    offset += f.ty.size()
+                }
+                let Some(field_ty) = field_ty else {
+                    return Err(error!(
+                        field.node.span,
+                        "Panic: field not found",
+                    ));
+                };
+                func.instruction(&Instruction::I32Const(offset as i32));
+                func.instruction(&Instruction::I32Add);
+                Ok((*field_ty).clone())
             }
 
             _ => todo!(),
@@ -494,11 +481,8 @@ impl Compiler {
                 }
             }
 
-            ExprKind::ArrayIndex {
-                expr: array_expr,
-                index,
-            } => {
-                let inner = self.push_address(func, array_expr, index)?;
+            ExprKind::ArrayIndex { .. } | ExprKind::FieldAccess { ..} => {
+                let inner = self.push_address(func, expr)?;
                 let load_instruction = match inner {
                     Ty::Int => Instruction::I32Load(MemArg {
                         offset: 0,
@@ -519,8 +503,6 @@ impl Compiler {
                 };
                 func.instruction(&load_instruction);
             }
-
-            ExprKind::FieldAccess { .. } => todo!(),
 
             ExprKind::Call { callee, args } => {
                 let name = match &callee.kind {

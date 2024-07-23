@@ -383,7 +383,7 @@ fn test_records() {
                 let p Point
                 p.x = 4
                 p.y = 5
-                print_num(p.x * p.y)
+                print_int(p.x * p.y)
             }
         "#,
         r#"
