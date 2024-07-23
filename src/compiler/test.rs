@@ -392,6 +392,67 @@ fn test_records() {
     )
 }
 
+#[test]
+fn test_nested_records() {
+    program_test(
+        r#"
+            record Point {
+                x int
+                y int
+            }
+            
+            record Line {
+                from Point
+                to Point
+            }
+            
+            export fn main() {
+                let line Line
+                
+                line.from.x = 0
+                line.from.y = 5
+                
+                line.to.x = 5
+                line.to.y = 0
+                
+                print_int(line.from.y * line.to.x)
+            }
+        "#,
+        r#"
+        25
+        "#,
+    )
+}
+
+#[test]
+fn test_nested_records_and_arrays() {
+    program_test(
+        r#"
+            record Point {
+                x int
+                y int
+                limits Array<int, 2>
+            }
+            
+            record Data {
+                start int
+                points Array<Point, 3>
+            }
+            
+            export fn main() {
+                let data Data
+                
+                data.points[1].limits[0] = 100
+                
+                print_int(data.points[1].limits[0])
+            }
+        "#,
+        r#"
+        100
+        "#,
+    )
+}
+
 fn assert_error(annotated_source: &str) {
     let error_re = Regex::new(r"^\s*//\s*(\^*)\s+(.*)\n$").unwrap();
     let mut source = String::new();
