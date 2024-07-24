@@ -17,6 +17,7 @@ mod resolution;
 #[cfg(test)]
 mod test;
 mod typecheck;
+mod resolver;
 
 #[derive(Clone, Copy)]
 struct WasmStr {
