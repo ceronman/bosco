@@ -31,25 +31,27 @@ pub struct Node {
     pub span: Span,
 }
 
-#[derive(Debug)]
+// TODO: Decide if Clone is the best thing to do here, or lifetimes instead.
+// If decided for Clone, then make pointers Rc instead of Box.
+#[derive(Debug, Clone)]
 pub struct Module {
     pub _node: Node,
     pub items: Vec<Item>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Item {
     pub node: Node,
     pub kind: ItemKind,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ItemKind {
     Function(Function),
     Record(Record),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Function {
     pub exported: bool,
     pub name: Identifier,
@@ -58,31 +60,31 @@ pub struct Function {
     pub body: Stmt,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Record {
     pub name: Identifier,
     pub fields: Vec<Field>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Field {
     pub name: Identifier,
     pub ty: Type,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Param {
     pub name: Identifier,
     pub ty: Type,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Stmt {
     pub node: Node,
     pub kind: StmtKind,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum StmtKind {
     ExprStmt(Expr),
     Block {
@@ -111,13 +113,13 @@ pub enum StmtKind {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Expr {
     pub node: Node,
     pub kind: ExprKind,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ExprKind {
     Literal(LiteralKind),
     Variable(Identifier),
@@ -144,13 +146,13 @@ pub enum ExprKind {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BinOp {
     pub node: Node,
     pub kind: BinOpKind,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum BinOpKind {
     Add,
     Sub,
@@ -167,19 +169,19 @@ pub enum BinOpKind {
     Or,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UnOp {
     pub node: Node,
     pub kind: UnOpKind,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum UnOpKind {
     Neg,
     Not,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum LiteralKind {
     Int(i32),
     Float(f64),
@@ -187,20 +189,20 @@ pub enum LiteralKind {
     String(Symbol),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Identifier {
     pub node: Node,
     pub symbol: Symbol,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Type {
     pub node: Node,
     pub name: Identifier,
     pub params: Vec<TypeParam>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TypeParam {
     Type(Box<Type>),
     Const(u32),

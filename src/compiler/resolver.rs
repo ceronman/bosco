@@ -27,10 +27,10 @@ struct TypedName {
     ty: Rc<Type>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 enum ResolutionState {
     Unresolved,
-    Resolving,
+    Resolving(Item),
     Resolved(Type)
 }
 
@@ -84,17 +84,28 @@ impl Resolver {
         self.scopes.pop_front();
     }
 
-    fn collect_top_level_types(&mut self, module: &Module) {
+    fn collect_top_level_types(&mut self, module: &Module) -> CompilerResult<()> {
+        // Prelude
+        let scope = self.scopes.front_mut().unwrap(); // TODO: Unwrap
+        scope.insert(Symbol::from("void"), ResolutionState::Resolved(Type::Void));
+        scope.insert(Symbol::from("int"), ResolutionState::Resolved(Type::Primitive(Primitive::Int)));
+        scope.insert(Symbol::from("float"), ResolutionState::Resolved(Type::Primitive(Primitive::Float)));
+        scope.insert(Symbol::from("bool"), ResolutionState::Resolved(Type::Primitive(Primitive::Bool)));
+
         for item in &module.items {
             match &item.kind {
                 ItemKind::Function(_) => {}
-                ItemKind::Record(_) => {}
+                ItemKind::Record(record) => {
+                    self.declare(&record.name, ResolutionState::Resolving(item.clone()))?;
+                }
             }
         }
+        Ok(())
     }
 
     fn resolve(&mut self, module: &Module) -> CompilerResult<()> {
         self.begin_scope();
+        self.collect_top_level_types(module)?;
         for item in &module.items {
             self.resolve_item(item)?;
         }
