@@ -1,24 +1,18 @@
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
-
 use crate::ast;
-use crate::ast::{BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module, NodeId, Param, Stmt, StmtKind, Symbol, UnOpKind};
+use crate::ast::{BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module, NodeId, Param, Stmt, StmtKind, Symbol, TypeParam, UnOpKind};
 use crate::error::{CompilerResult, error};
 
 #[derive(Debug, Clone,  Eq, PartialEq)]
 enum Type {
     Void,
-    Primitive(Primitive),
-    Array { inner: Rc<Type>,  size: usize },
-    Record { fields: Rc<[TypedName]> },
-    Function { params: Rc<[TypedName]>, return_ty: Rc<Type> }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-enum Primitive {
     Int,
     Float,
-    Bool
+    Bool,
+    Array { inner: Rc<Type>,  size: u32 },
+    Record { fields: Rc<[TypedName]> },
+    Function { params: Rc<[TypedName]>, return_ty: Rc<Type> }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -29,12 +23,13 @@ struct TypedName {
 
 #[derive(Debug)]
 enum ResolutionState {
-    Unresolved,
-    Resolving(Item),
+    Unresolved(Item),
+    InProgress,
     Resolved(Type)
 }
 
-struct Resolver {
+#[derive(Default)]
+pub struct Resolver {
     scopes: VecDeque<HashMap<Symbol, ResolutionState>>,
     expr_types: HashMap<NodeId, Type>,
 }
@@ -61,19 +56,30 @@ impl Resolver {
     }
 
     fn lookup(&mut self, ident: &Identifier) -> CompilerResult<Type> {
-        for env in &self.scopes {
-            if let Some(ResolutionState::Resolved(ty)) = env.get(&ident.symbol) {
-                return Ok(ty.clone());
+        for env in &mut self.scopes {
+            if let Some(state) = env.get_mut(&ident.symbol) {
+                return match state {
+                    ResolutionState::Unresolved(_) => {
+                        let ResolutionState::Unresolved(item) = std::mem::replace(state, ResolutionState::InProgress) else {
+                            unreachable!()
+                        };
+                        let ty = self.resolve_item(&item)?;
+                        // std::mem::replace(state, ResolutionState::Resolved(ty.clone()));
+                        Ok(ty)
+                    }
+                    ResolutionState::InProgress => {
+                        Err(error!(ident.node.span, "Type contains cycles"))
+                    }
+                    ResolutionState::Resolved(ty) => {
+                        Ok(ty.clone())
+                    }
+                };
             }
         }
         Err(error!(
             ident.node.span,
-            "Undeclared variable '{}'", ident.symbol
+            "Unresolved identifier '{}'", ident.symbol
         ))
-    }
-
-    fn lookup_type(&self, _ast_ty: &ast::Type) -> CompilerResult<Type> {
-        todo!()
     }
 
     fn begin_scope(&mut self) {
@@ -88,22 +94,24 @@ impl Resolver {
         // Prelude
         let scope = self.scopes.front_mut().unwrap(); // TODO: Unwrap
         scope.insert(Symbol::from("void"), ResolutionState::Resolved(Type::Void));
-        scope.insert(Symbol::from("int"), ResolutionState::Resolved(Type::Primitive(Primitive::Int)));
-        scope.insert(Symbol::from("float"), ResolutionState::Resolved(Type::Primitive(Primitive::Float)));
-        scope.insert(Symbol::from("bool"), ResolutionState::Resolved(Type::Primitive(Primitive::Bool)));
+        scope.insert(Symbol::from("int"), ResolutionState::Resolved(Type::Int));
+        scope.insert(Symbol::from("float"), ResolutionState::Resolved(Type::Float));
+        scope.insert(Symbol::from("bool"), ResolutionState::Resolved(Type::Bool));
 
         for item in &module.items {
             match &item.kind {
-                ItemKind::Function(_) => {}
+                ItemKind::Function(function) => {
+                    self.declare(&function.name, ResolutionState::Unresolved(item.clone()))?;
+                }
                 ItemKind::Record(record) => {
-                    self.declare(&record.name, ResolutionState::Resolving(item.clone()))?;
+                    self.declare(&record.name, ResolutionState::Unresolved(item.clone()))?;
                 }
             }
         }
         Ok(())
     }
 
-    fn resolve(&mut self, module: &Module) -> CompilerResult<()> {
+    pub fn resolve(&mut self, module: &Module) -> CompilerResult<()> {
         self.begin_scope();
         self.collect_top_level_types(module)?;
         for item in &module.items {
@@ -114,21 +122,32 @@ impl Resolver {
         Ok(())
     }
 
-    fn resolve_item(&mut self, item: &Item) -> CompilerResult<()> {
-        match &item.kind {
+    fn resolve_item(&mut self, item: &Item) -> CompilerResult<Type> {
+        let ty = match &item.kind {
             ItemKind::Function(function) => {
                 self.resolve_function(function)?;
+                Type::Void // TODO: Fix
             }
 
-            ItemKind::Record(_) => {}
-        }
-        Ok(())
+            ItemKind::Record(record) => {
+                let mut fields = Vec::with_capacity(record.fields.len());
+                for f in &record.fields {
+                    fields.push(TypedName {
+                        name: f.name.symbol.clone(),
+                        ty: self.resolve_ty(&f.ty)?.into(),
+                    })
+                }
+                Type::Record { fields: Rc::from(fields) }
+            }
+        };
+        Ok(ty)
     }
 
     fn resolve_function(&mut self, function: &Function) -> CompilerResult<()> {
         self.begin_scope();
         for Param { name, ty} in &function.params {
-            self.declare(name, ResolutionState::Resolved(self.lookup_type(&ty)?))?;
+            let param_ty = self.resolve_ty(ty);
+            self.declare(name, ResolutionState::Resolved(param_ty?))?;
         }
         self.resolve_stmt(&function.body)?;
         self.end_scope();
@@ -150,7 +169,8 @@ impl Resolver {
             }
 
             StmtKind::Declaration { name, ty, value } => {
-                self.declare(name, ResolutionState::Resolved(self.lookup_type(&ty)?))?;
+                let var_type = self.resolve_ty(&ty)?;
+                self.declare(name, ResolutionState::Resolved(var_type))?;
                 if let Some(value) = value {
                     self.resolve_expr(value)?;
                 }
@@ -185,13 +205,13 @@ impl Resolver {
 
     fn resolve_expr(&mut self, expr: &Expr) -> CompilerResult<Type> {
         let ty = match &expr.kind {
-            ExprKind::Literal(LiteralKind::Int(_)) => Type::Primitive(Primitive::Int),
-            ExprKind::Literal(LiteralKind::Float(_)) => Type::Primitive(Primitive::Float),
-            ExprKind::Literal(LiteralKind::String { .. }) => Type::Primitive(Primitive::Int), // TODO: Add String type
-            ExprKind::Literal(LiteralKind::Bool(_)) => Type::Primitive(Primitive::Bool),
+            ExprKind::Literal(LiteralKind::Int(_)) => Type::Int,
+            ExprKind::Literal(LiteralKind::Float(_)) => Type::Float,
+            ExprKind::Literal(LiteralKind::String { .. }) => Type::Int, // TODO: Add String type
+            ExprKind::Literal(LiteralKind::Bool(_)) => Type::Bool,
             ExprKind::Variable(ident) => self.lookup(ident)?,
             ExprKind::ArrayIndex { expr, index } => {
-                let Type::Primitive(Primitive::Int) = self.resolve_expr(index)? else {
+                let Type::Int = self.resolve_expr(index)? else {
                     return Err(error!(
                         index.node.span,
                         "Type Error: Array index must be Int"
@@ -245,23 +265,23 @@ impl Resolver {
                     | BinOpKind::Eq
                     | BinOpKind::Ne
                     | BinOpKind::Ge
-                    | BinOpKind::Gt => Type::Primitive(Primitive::Bool),
+                    | BinOpKind::Gt => Type::Bool,
                     BinOpKind::And | BinOpKind::Or => {
-                        if left_ty != Type::Primitive(Primitive::Bool) {
+                        if left_ty != Type::Bool {
                             return Err(error!(
                                 left.node.span,
                                 "Type Error: operand should be 'bool'",
                             ));
                         }
-                        if right_ty != Type::Primitive(Primitive::Bool) {
+                        if right_ty != Type::Bool {
                             return Err(error!(
                                 right.node.span,
                                 "Type Error: operand should be 'bool'",
                             ));
                         }
-                        Type::Primitive(Primitive::Bool)
+                        Type::Bool
                     }
-                    BinOpKind::Mod if left_ty == Type::Primitive(Primitive::Float) => {
+                    BinOpKind::Mod if left_ty == Type::Float => {
                         return Err(error!(
                             expr.node.span,
                             "Type Error: '%' operator doesn't work on floats",
@@ -273,7 +293,7 @@ impl Resolver {
 
             ExprKind::Unary { operator, right } => {
                 let right_ty = self.resolve_expr(right)?;
-                if operator.kind == UnOpKind::Not && right_ty != Type::Primitive(Primitive::Bool) {
+                if operator.kind == UnOpKind::Not && right_ty != Type::Bool {
                     return Err(error!(
                         right.node.span,
                         "Type Error: operand should be 'bool'"
@@ -325,5 +345,27 @@ impl Resolver {
         };
         self.expr_types.insert(expr.node.id, ty.clone());
         Ok(ty)
+    }
+
+    fn resolve_ty(&mut self, ty: &ast::Type) -> CompilerResult<Type> {
+        // TODO: This is sort of a hack!
+        if ty.name.symbol.as_str() == "Array" {
+            let mut params = ty.params.iter();
+            let Some(TypeParam::Type(inner)) = params.next() else {
+                return Err(error!(
+                        ty.node.span,
+                        "Array requires a valid inner type parameter",
+                    ));
+            };
+            let Some(TypeParam::Const(size)) = params.next() else {
+                return Err(error!(
+                        ty.node.span,
+                        "Array requires a valid size type parameter",
+                    ));
+            };
+            let inner = self.resolve_ty(&*inner)?;
+            return Ok(Type::Array { inner: inner.into(), size: *size });
+        }
+        return self.lookup(&ty.name);
     }
 }

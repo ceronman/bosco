@@ -9,6 +9,7 @@ use wasm_encoder::{
 
 use crate::ast::{BinOpKind, Expr, ExprKind, Function, Identifier, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind, Symbol, UnOpKind};
 use crate::compiler::resolution::{Address, FnSignature, SymbolTable};
+use crate::compiler::resolver::Resolver;
 use crate::error::{error, CompilerResult};
 use crate::lexer::Span;
 use crate::parser::parse;
@@ -600,6 +601,8 @@ impl Compiler {
     }
 
     fn compile(&mut self, module: &Module) -> CompilerResult<Vec<u8>> {
+        let mut resolver = Resolver::default();
+        resolver.resolve(module)?;
         self.import_functions()?;
         self.export_memory();
         self.symbol_table.resolve(module)?;
