@@ -1,19 +1,32 @@
+use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
-use std::process::id;
 use std::rc::Rc;
-use crate::ast;
-use crate::ast::{BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module, NodeId, Param, Stmt, StmtKind, Symbol, TypeParam, UnOpKind};
-use crate::error::{CompilerResult, error};
 
-#[derive(Debug, Clone,  Eq, PartialEq)]
+use crate::ast;
+use crate::ast::{
+    BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module, NodeId,
+    Param, Stmt, StmtKind, Symbol, TypeParam, UnOpKind,
+};
+use crate::error::{error, CompilerError, CompilerResult};
+use crate::lexer::Span;
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 enum Type {
     Void,
     Int,
     Float,
     Bool,
-    Array { inner: Rc<Type>,  size: u32 },
-    Record { fields: Rc<[TypedName]> },
-    Function { params: Rc<[TypedName]>, return_ty: Rc<Type> }
+    Array {
+        inner: Rc<Type>,
+        size: u32,
+    },
+    Record {
+        fields: Rc<[TypedName]>,
+    },
+    Function {
+        params: Rc<[TypedName]>,
+        return_ty: Rc<Type>,
+    },
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -23,66 +36,65 @@ struct TypedName {
 }
 
 #[derive(Debug)]
-enum ResolutionState {
+enum ResolveState {
     Unresolved(Item),
     InProgress,
-    Resolved(Type)
+    Resolved(Type),
 }
 
 #[derive(Default)]
 pub struct Resolver {
-    scopes: VecDeque<HashMap<Symbol, ResolutionState>>,
+    scopes: VecDeque<HashMap<Symbol, Rc<RefCell<ResolveState>>>>,
     expr_types: HashMap<NodeId, Type>,
 }
 
 impl Resolver {
-    fn declare(&mut self, ident: &Identifier, state: ResolutionState) -> CompilerResult<()> {
+    fn declare(
+        &mut self,
+        symbol: &Symbol,
+        state: ResolveState,
+        error_builder: impl Fn() -> CompilerError,
+    ) -> CompilerResult<()> {
         let Some(scope) = self.scopes.front_mut() else {
-            return Err(error!(
-                ident.node.span,
-                "Variable '{}' was declared outside of any scope", ident.symbol
-            ));
+            panic!("There are no scopes available") // TODO: Think about panics
         };
 
-        if scope.contains_key(&ident.symbol) {
-            return Err(error!(
-                ident.node.span,
-                "Variable '{}' was already declared in this scope", ident.symbol
-            ));
+        if scope.contains_key(&symbol) {
+            return Err(error_builder());
         }
 
-        scope.insert(ident.symbol.clone(), state);
+        scope.insert(symbol.clone(), Rc::from(RefCell::new(state)));
 
         Ok(())
     }
-    
-    fn find_state(&mut self, ident: &Identifier) -> CompilerResult<&mut ResolutionState> {
-        for scope in self.scopes.iter_mut() {
-            if let Some(state) = scope.get_mut(&ident.symbol) {
-                return Ok(state)
-            }
-        }
-        return Err(error!(ident.node.span,"Unresolved identifier '{}'", ident.symbol))
-    }
 
-    fn lookup(&mut self, ident: &Identifier) -> CompilerResult<Type> {
-        let state = self.find_state(ident)?;
-        let resolved_ty = match state {
-            ResolutionState::Unresolved(item) => {
-                let item = item.clone();
-                *state = ResolutionState::InProgress;
-                self.resolve_item(&item)?
-            }
-            ResolutionState::InProgress => {
-                return Err(error!(ident.node.span, "Type contains cycles"))
-            }
-            ResolutionState::Resolved(ty) => {
-                return Ok(ty.clone())
-            }
+    fn lookup(
+        &mut self,
+        ident: &Identifier,
+        error_builder: impl Fn() -> CompilerError,
+    ) -> CompilerResult<Type> {
+        let state = self
+            .scopes
+            .iter()
+            .find_map(|scope| scope.get(&ident.symbol).cloned());
+        let Some(state) = state else {
+            return Err(error_builder());
         };
-        let state = self.find_state(ident)?;
-        *state = ResolutionState::Resolved(resolved_ty.clone());
-        Ok(resolved_ty)
+        let ty = match &*state.borrow() {
+            ResolveState::Unresolved(item) => {
+                let ty = self.resolve_item(&item)?;
+                ty.clone()
+            }
+            ResolveState::InProgress => {
+                return Err(error!(
+                    ident.node.span,
+                    "Type '{}' contains cycles", ident.symbol
+                ))
+            }
+            ResolveState::Resolved(ty) => return Ok(ty.clone()),
+        };
+        state.replace(ResolveState::Resolved(ty.clone()));
+        Ok(ty)
     }
 
     fn begin_scope(&mut self) {
@@ -93,21 +105,56 @@ impl Resolver {
         self.scopes.pop_front();
     }
 
+    // TODO: Maybe this can be unified with `declare()`
+    fn declare_builtin(&mut self, name: &str, ty: Type) -> CompilerResult<()> {
+        let Some(scope) = self.scopes.front_mut() else {
+            return Err(error!(
+                Span(0, 0),
+                "Builtin '{name}' was declared outside of any scope"
+            ));
+        };
+        let symbol = Symbol::from(name);
+        if scope.contains_key(&symbol) {
+            return Err(error!(
+                Span(0, 0),
+                "Builtin 'name' was already declared in this scope"
+            ));
+        }
+        scope.insert(symbol, Rc::from(RefCell::new(ResolveState::Resolved(ty))));
+        Ok(())
+    }
+
     fn collect_top_level_types(&mut self, module: &Module) -> CompilerResult<()> {
-        // Prelude
-        let scope = self.scopes.front_mut().unwrap(); // TODO: Unwrap
-        scope.insert(Symbol::from("void"), ResolutionState::Resolved(Type::Void));
-        scope.insert(Symbol::from("int"), ResolutionState::Resolved(Type::Int));
-        scope.insert(Symbol::from("float"), ResolutionState::Resolved(Type::Float));
-        scope.insert(Symbol::from("bool"), ResolutionState::Resolved(Type::Bool));
+        self.declare_builtin("void", Type::Void)?;
+        self.declare_builtin("int", Type::Int)?;
+        self.declare_builtin("float", Type::Float)?;
+        self.declare_builtin("bool", Type::Bool)?;
 
         for item in &module.items {
             match &item.kind {
                 ItemKind::Function(function) => {
-                    self.declare(&function.name, ResolutionState::Unresolved(item.clone()))?;
+                    self.declare(
+                        &function.name.symbol,
+                        ResolveState::Unresolved(item.clone()),
+                        || {
+                            error!(
+                                function.name.node.span,
+                                "Function '{}' was already defined", function.name.symbol
+                            )
+                        },
+                    )?;
                 }
                 ItemKind::Record(record) => {
-                    self.declare(&record.name, ResolutionState::Unresolved(item.clone()))?;
+                    self.declare(
+                        &record.name.symbol,
+                        ResolveState::Unresolved(item.clone()),
+                        || {
+                            error!(
+                                record.name.node.span,
+                                "Record '{}' was already defined", record.name.symbol
+                            )
+                        },
+                    )?;
                 }
             }
         }
@@ -140,7 +187,9 @@ impl Resolver {
                         ty: self.resolve_ty(&f.ty)?.into(),
                     })
                 }
-                Type::Record { fields: Rc::from(fields) }
+                Type::Record {
+                    fields: Rc::from(fields),
+                }
             }
         };
         Ok(ty)
@@ -148,9 +197,14 @@ impl Resolver {
 
     fn resolve_function(&mut self, function: &Function) -> CompilerResult<()> {
         self.begin_scope();
-        for Param { name, ty} in &function.params {
+        for Param { name, ty } in &function.params {
             let param_ty = self.resolve_ty(ty);
-            self.declare(name, ResolutionState::Resolved(param_ty?))?;
+            self.declare(&name.symbol, ResolveState::Resolved(param_ty?), || {
+                error!(
+                    name.node.span,
+                    "Parameter '{}' is already defined", name.symbol
+                )
+            })?;
         }
         self.resolve_stmt(&function.body)?;
         self.end_scope();
@@ -173,7 +227,12 @@ impl Resolver {
 
             StmtKind::Declaration { name, ty, value } => {
                 let var_type = self.resolve_ty(&ty)?;
-                self.declare(name, ResolutionState::Resolved(var_type))?;
+                self.declare(&name.symbol, ResolveState::Resolved(var_type), || {
+                    error!(
+                        name.node.span,
+                        "Variable '{}' was already declared in this scope", name.symbol
+                    )
+                })?;
                 if let Some(value) = value {
                     self.resolve_expr(value)?;
                 }
@@ -212,7 +271,9 @@ impl Resolver {
             ExprKind::Literal(LiteralKind::Float(_)) => Type::Float,
             ExprKind::Literal(LiteralKind::String { .. }) => Type::Int, // TODO: Add String type
             ExprKind::Literal(LiteralKind::Bool(_)) => Type::Bool,
-            ExprKind::Variable(ident) => self.lookup(ident)?,
+            ExprKind::Variable(ident) => self.lookup(ident, || {
+                error!(ident.node.span, "Undeclared variable '{}'", ident.symbol)
+            })?,
             ExprKind::ArrayIndex { expr, index } => {
                 let Type::Int = self.resolve_expr(index)? else {
                     return Err(error!(
@@ -223,7 +284,7 @@ impl Resolver {
 
                 let expr_ty = self.resolve_expr(expr)?;
 
-                let Type::Array { inner, ..} = expr_ty else {
+                let Type::Array { inner, .. } = expr_ty else {
                     return Err(error!(
                         expr.node.span,
                         "Type Error: Expecting an Array, found {expr_ty:?}"
@@ -246,7 +307,7 @@ impl Resolver {
                     ));
                 };
                 (*field.ty).clone()
-            },
+            }
             ExprKind::Binary {
                 left,
                 right,
@@ -356,19 +417,24 @@ impl Resolver {
             let mut params = ty.params.iter();
             let Some(TypeParam::Type(inner)) = params.next() else {
                 return Err(error!(
-                        ty.node.span,
-                        "Array requires a valid inner type parameter",
-                    ));
+                    ty.node.span,
+                    "Array requires a valid inner type parameter",
+                ));
             };
             let Some(TypeParam::Const(size)) = params.next() else {
                 return Err(error!(
-                        ty.node.span,
-                        "Array requires a valid size type parameter",
-                    ));
+                    ty.node.span,
+                    "Array requires a valid size type parameter",
+                ));
             };
             let inner = self.resolve_ty(&*inner)?;
-            return Ok(Type::Array { inner: inner.into(), size: *size });
+            return Ok(Type::Array {
+                inner: inner.into(),
+                size: *size,
+            });
         }
-        return self.lookup(&ty.name);
+        return self.lookup(&ty.name, || {
+            error!(ty.name.node.span, "Unknown Type '{}'", ty.name.symbol)
+        });
     }
 }

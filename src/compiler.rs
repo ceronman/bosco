@@ -7,7 +7,10 @@ use wasm_encoder::{
     ValType,
 };
 
-use crate::ast::{BinOpKind, Expr, ExprKind, Function, Identifier, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind, Symbol, UnOpKind};
+use crate::ast::{
+    BinOpKind, Expr, ExprKind, Function, Identifier, ItemKind, LiteralKind, Module, NodeId, Stmt,
+    StmtKind, Symbol, UnOpKind,
+};
 use crate::compiler::resolution::{Address, FnSignature, SymbolTable};
 use crate::compiler::resolver::Resolver;
 use crate::error::{error, CompilerResult};
@@ -15,10 +18,10 @@ use crate::lexer::Span;
 use crate::parser::parse;
 
 mod resolution;
+mod resolver;
 #[cfg(test)]
 mod test;
 mod typecheck;
-mod resolver;
 
 #[derive(Clone, Copy)]
 struct WasmStr {
@@ -217,8 +220,7 @@ impl Compiler {
                     };
                     func.instruction(&instruction);
                 }
-                ExprKind::FieldAccess { expr, field } => {
-                }
+                ExprKind::FieldAccess { expr, field } => {}
                 _ => {
                     return Err(error!(
                         stmt.node.span,
@@ -301,19 +303,16 @@ impl Compiler {
                     ));
                 };
                 let mut offset = 0;
-                let mut field_ty= None;
+                let mut field_ty = None;
                 for f in &fields {
                     if f.name == field.symbol {
                         field_ty = Some(f.ty.clone());
-                        break
+                        break;
                     }
                     offset += f.ty.size()
                 }
                 let Some(field_ty) = field_ty else {
-                    return Err(error!(
-                        field.node.span,
-                        "Panic: field not found",
-                    ));
+                    return Err(error!(field.node.span, "Panic: field not found",));
                 };
                 func.instruction(&Instruction::I32Const(offset as i32));
                 func.instruction(&Instruction::I32Add);
@@ -483,7 +482,7 @@ impl Compiler {
                 }
             }
 
-            ExprKind::ArrayIndex { .. } | ExprKind::FieldAccess { ..} => {
+            ExprKind::ArrayIndex { .. } | ExprKind::FieldAccess { .. } => {
                 let inner = self.push_address(func, expr)?;
                 let load_instruction = match inner {
                     Ty::Int => Instruction::I32Load(MemArg {

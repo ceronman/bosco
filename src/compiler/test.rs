@@ -561,6 +561,18 @@ fn test_already_declared_var() {
 }
 
 #[test]
+fn test_already_declared_param() {
+    assert_error(
+        r#"
+        fn foo(a int, a float) {
+                    //^ Compiler Error: Parameter 'a' is already defined
+        }
+        export fn main() {
+        }"#,
+    );
+}
+
+#[test]
 fn test_parse_missing_explicit_type() {
     assert_error(
         r#"
@@ -845,7 +857,7 @@ fn test_duplicated_record() {
         }
         
         record Foo {
-             //^^^ Compiler Error: Record already defined
+             //^^^ Compiler Error: Record 'Foo' was already defined
             weight float
         }
         "#,

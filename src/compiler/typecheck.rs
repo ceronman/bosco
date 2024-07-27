@@ -17,7 +17,7 @@ impl Compiler {
     fn type_check_item(&mut self, item: &Item) -> CompilerResult<()> {
         match &item.kind {
             ItemKind::Function(f) => self.type_check_function(f)?,
-            ItemKind::Record(_) => {},
+            ItemKind::Record(_) => {}
         }
         Ok(())
     }
@@ -147,7 +147,7 @@ impl Compiler {
                     ));
                 };
                 (*field.ty).clone()
-            },
+            }
             ExprKind::Binary {
                 left,
                 right,
