@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::process::id;
 use std::rc::Rc;
 use crate::ast;
 use crate::ast::{BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module, NodeId, Param, Stmt, StmtKind, Symbol, TypeParam, UnOpKind};
@@ -54,32 +55,34 @@ impl Resolver {
 
         Ok(())
     }
-
-    fn lookup(&mut self, ident: &Identifier) -> CompilerResult<Type> {
-        for env in &mut self.scopes {
-            if let Some(state) = env.get_mut(&ident.symbol) {
-                return match state {
-                    ResolutionState::Unresolved(_) => {
-                        let ResolutionState::Unresolved(item) = std::mem::replace(state, ResolutionState::InProgress) else {
-                            unreachable!()
-                        };
-                        let ty = self.resolve_item(&item)?;
-                        // std::mem::replace(state, ResolutionState::Resolved(ty.clone()));
-                        Ok(ty)
-                    }
-                    ResolutionState::InProgress => {
-                        Err(error!(ident.node.span, "Type contains cycles"))
-                    }
-                    ResolutionState::Resolved(ty) => {
-                        Ok(ty.clone())
-                    }
-                };
+    
+    fn find_state(&mut self, ident: &Identifier) -> CompilerResult<&mut ResolutionState> {
+        for scope in self.scopes.iter_mut() {
+            if let Some(state) = scope.get_mut(&ident.symbol) {
+                return Ok(state)
             }
         }
-        Err(error!(
-            ident.node.span,
-            "Unresolved identifier '{}'", ident.symbol
-        ))
+        return Err(error!(ident.node.span,"Unresolved identifier '{}'", ident.symbol))
+    }
+
+    fn lookup(&mut self, ident: &Identifier) -> CompilerResult<Type> {
+        let state = self.find_state(ident)?;
+        let resolved_ty = match state {
+            ResolutionState::Unresolved(item) => {
+                let item = item.clone();
+                *state = ResolutionState::InProgress;
+                self.resolve_item(&item)?
+            }
+            ResolutionState::InProgress => {
+                return Err(error!(ident.node.span, "Type contains cycles"))
+            }
+            ResolutionState::Resolved(ty) => {
+                return Ok(ty.clone())
+            }
+        };
+        let state = self.find_state(ident)?;
+        *state = ResolutionState::Resolved(resolved_ty.clone());
+        Ok(resolved_ty)
     }
 
     fn begin_scope(&mut self) {
