@@ -8,11 +8,11 @@ use wasm_encoder::{
 };
 
 use crate::ast::{
-    BinOpKind, Expr, ExprKind, Function, Identifier, ItemKind, LiteralKind, Module, NodeId, Stmt,
-    StmtKind, Symbol, UnOpKind,
+    BinOpKind, Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind,
+    Symbol, UnOpKind,
 };
 use crate::compiler::resolution::{Address, FnSignature, SymbolTable};
-use crate::compiler::resolver::Resolver;
+use crate::compiler::resolver::{Resolver, Type};
 use crate::error::{error, CompilerResult};
 use crate::lexer::Span;
 use crate::parser::parse;
@@ -85,7 +85,7 @@ impl Counter {
 struct Compiler {
     strings: HashMap<NodeId, WasmStr>,
     symbol_table: SymbolTable,
-    expression_types: HashMap<NodeId, Ty>,
+    node_types: HashMap<NodeId, Type>,
     current_function: Option<Rc<FnSignature>>,
     types: TypeSection,
     functions: FunctionSection,
@@ -197,19 +197,19 @@ impl Compiler {
                     self.push_address(func, target)?;
                     self.expression(func, value)?;
 
-                    let instruction = match self.expression_types.get(&value.node.id) {
+                    let instruction = match self.node_types.get(&value.node.id) {
                         // TODO: support this via polymorphism
-                        Some(Ty::Int) => Instruction::I32Store(MemArg {
+                        Some(Type::Int) => Instruction::I32Store(MemArg {
                             offset: 0,
                             align: 2,
                             memory_index: 0,
                         }),
-                        Some(Ty::Float) => Instruction::F64Store(MemArg {
+                        Some(Type::Float) => Instruction::F64Store(MemArg {
                             offset: 0,
                             align: 3,
                             memory_index: 0,
                         }),
-                        Some(Ty::Bool) => Instruction::I32Store8(MemArg {
+                        Some(Type::Bool) => Instruction::I32Store8(MemArg {
                             offset: 0,
                             align: 0,
                             memory_index: 0,
@@ -382,7 +382,7 @@ impl Compiler {
                 self.expression(func, left)?;
                 self.expression(func, right)?;
 
-                let Some(ty) = self.expression_types.get(&left.node.id) else {
+                let Some(ty) = self.node_types.get(&left.node.id) else {
                     return Err(error!(
                         left.node.span,
                         "Fatal: Not type found for expression"
@@ -390,37 +390,37 @@ impl Compiler {
                 };
 
                 match (&operator.kind, ty) {
-                    (BinOpKind::Eq, Ty::Int) => func.instruction(&Instruction::I32Eq),
-                    (BinOpKind::Eq, Ty::Float) => func.instruction(&Instruction::F64Eq),
+                    (BinOpKind::Eq, Type::Int) => func.instruction(&Instruction::I32Eq),
+                    (BinOpKind::Eq, Type::Float) => func.instruction(&Instruction::F64Eq),
 
-                    (BinOpKind::Ne, Ty::Int) => func.instruction(&Instruction::I32Ne),
-                    (BinOpKind::Ne, Ty::Float) => func.instruction(&Instruction::F64Ne),
+                    (BinOpKind::Ne, Type::Int) => func.instruction(&Instruction::I32Ne),
+                    (BinOpKind::Ne, Type::Float) => func.instruction(&Instruction::F64Ne),
 
-                    (BinOpKind::Gt, Ty::Int) => func.instruction(&Instruction::I32GtS),
-                    (BinOpKind::Gt, Ty::Float) => func.instruction(&Instruction::F64Gt),
+                    (BinOpKind::Gt, Type::Int) => func.instruction(&Instruction::I32GtS),
+                    (BinOpKind::Gt, Type::Float) => func.instruction(&Instruction::F64Gt),
 
-                    (BinOpKind::Ge, Ty::Int) => func.instruction(&Instruction::I32GeS),
-                    (BinOpKind::Ge, Ty::Float) => func.instruction(&Instruction::F64Ge),
+                    (BinOpKind::Ge, Type::Int) => func.instruction(&Instruction::I32GeS),
+                    (BinOpKind::Ge, Type::Float) => func.instruction(&Instruction::F64Ge),
 
-                    (BinOpKind::Lt, Ty::Int) => func.instruction(&Instruction::I32LtS),
-                    (BinOpKind::Lt, Ty::Float) => func.instruction(&Instruction::F64Lt),
+                    (BinOpKind::Lt, Type::Int) => func.instruction(&Instruction::I32LtS),
+                    (BinOpKind::Lt, Type::Float) => func.instruction(&Instruction::F64Lt),
 
-                    (BinOpKind::Le, Ty::Int) => func.instruction(&Instruction::I32LeS),
-                    (BinOpKind::Le, Ty::Float) => func.instruction(&Instruction::F64Le),
+                    (BinOpKind::Le, Type::Int) => func.instruction(&Instruction::I32LeS),
+                    (BinOpKind::Le, Type::Float) => func.instruction(&Instruction::F64Le),
 
-                    (BinOpKind::Add, Ty::Int) => func.instruction(&Instruction::I32Add),
-                    (BinOpKind::Add, Ty::Float) => func.instruction(&Instruction::F64Add),
+                    (BinOpKind::Add, Type::Int) => func.instruction(&Instruction::I32Add),
+                    (BinOpKind::Add, Type::Float) => func.instruction(&Instruction::F64Add),
 
-                    (BinOpKind::Sub, Ty::Int) => func.instruction(&Instruction::I32Sub),
-                    (BinOpKind::Sub, Ty::Float) => func.instruction(&Instruction::F64Sub),
+                    (BinOpKind::Sub, Type::Int) => func.instruction(&Instruction::I32Sub),
+                    (BinOpKind::Sub, Type::Float) => func.instruction(&Instruction::F64Sub),
 
-                    (BinOpKind::Mul, Ty::Int) => func.instruction(&Instruction::I32Mul),
-                    (BinOpKind::Mul, Ty::Float) => func.instruction(&Instruction::F64Mul),
+                    (BinOpKind::Mul, Type::Int) => func.instruction(&Instruction::I32Mul),
+                    (BinOpKind::Mul, Type::Float) => func.instruction(&Instruction::F64Mul),
 
-                    (BinOpKind::Div, Ty::Int) => func.instruction(&Instruction::I32DivS),
-                    (BinOpKind::Div, Ty::Float) => func.instruction(&Instruction::F64Div),
+                    (BinOpKind::Div, Type::Int) => func.instruction(&Instruction::I32DivS),
+                    (BinOpKind::Div, Type::Float) => func.instruction(&Instruction::F64Div),
 
-                    (BinOpKind::Mod, Ty::Int) => func.instruction(&Instruction::I32RemS),
+                    (BinOpKind::Mod, Type::Int) => func.instruction(&Instruction::I32RemS),
 
                     _ => {
                         return Err(error!(
@@ -441,7 +441,7 @@ impl Compiler {
                     func.instruction(&Instruction::End);
                 }
                 UnOpKind::Neg => {
-                    let Some(ty) = self.expression_types.get(&right.node.id) else {
+                    let Some(ty) = self.node_types.get(&right.node.id) else {
                         return Err(error!(
                             right.node.span,
                             "Fatal: Not type found for expression",
@@ -449,11 +449,11 @@ impl Compiler {
                     };
 
                     match ty {
-                        Ty::Float => {
+                        Type::Float => {
                             self.expression(func, right)?;
                             func.instruction(&Instruction::F64Neg);
                         }
-                        Ty::Int => {
+                        Type::Int => {
                             func.instruction(&Instruction::I32Const(0));
                             self.expression(func, right)?;
                             func.instruction(&Instruction::I32Sub);
@@ -602,10 +602,10 @@ impl Compiler {
     fn compile(&mut self, module: &Module) -> CompilerResult<Vec<u8>> {
         let mut resolver = Resolver::default();
         resolver.resolve(module)?;
+        self.node_types = resolver.node_types;
         self.import_functions()?;
         self.export_memory();
         self.symbol_table.resolve(module)?;
-        self.type_check(module)?;
         self.module(module)?;
         self.encode_wasm()
     }

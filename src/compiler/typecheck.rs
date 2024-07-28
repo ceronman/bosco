@@ -245,7 +245,7 @@ impl Compiler {
                 }
             }
         };
-        self.expression_types.insert(expr.node.id, ty.clone());
+        // self.expression_types.insert(expr.node.id, ty.clone());
         Ok(ty)
     }
 }

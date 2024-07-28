@@ -7,11 +7,11 @@ use crate::ast::{
     BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module, NodeId,
     Param, Stmt, StmtKind, Symbol, TypeParam, UnOpKind,
 };
-use crate::error::{error, CompilerError, CompilerResult};
+use crate::error::{CompilerError, CompilerResult, error};
 use crate::lexer::Span;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-enum Type {
+pub enum Type {
     Void,
     Int,
     Float,
@@ -30,7 +30,7 @@ enum Type {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-struct TypedName {
+pub struct TypedName {
     name: Symbol,
     ty: Rc<Type>,
 }
@@ -45,7 +45,7 @@ enum ResolveState {
 #[derive(Default)]
 pub struct Resolver {
     scopes: VecDeque<HashMap<Symbol, Rc<RefCell<ResolveState>>>>,
-    expr_types: HashMap<NodeId, Type>,
+    pub node_types: HashMap<NodeId, Type>,
 }
 
 impl Resolver {
@@ -130,6 +130,28 @@ impl Resolver {
         self.declare_builtin("float", Type::Float)?;
         self.declare_builtin("bool", Type::Bool)?;
 
+        // TODO: Define proper imports
+        self.declare_builtin(
+            "print_int",
+            Type::Function {
+                params: Rc::new([TypedName {
+                    name: Symbol::from("value"),
+                    ty: Rc::new(Type::Int),
+                }]),
+                return_ty: Rc::new(Type::Void),
+            },
+        )?;
+        self.declare_builtin(
+            "print_float",
+            Type::Function {
+                params: Rc::new([TypedName {
+                    name: Symbol::from("value"),
+                    ty: Rc::new(Type::Float),
+                }]),
+                return_ty: Rc::new(Type::Void),
+            },
+        )?;
+
         for item in &module.items {
             match &item.kind {
                 ItemKind::Function(function) => {
@@ -174,10 +196,7 @@ impl Resolver {
 
     fn resolve_item(&mut self, item: &Item) -> CompilerResult<Type> {
         let ty = match &item.kind {
-            ItemKind::Function(function) => {
-                self.resolve_function(function)?;
-                Type::Void // TODO: Fix
-            }
+            ItemKind::Function(function) => self.resolve_function(function)?,
 
             ItemKind::Record(record) => {
                 let mut fields = Vec::with_capacity(record.fields.len());
@@ -195,11 +214,16 @@ impl Resolver {
         Ok(ty)
     }
 
-    fn resolve_function(&mut self, function: &Function) -> CompilerResult<()> {
-        self.begin_scope();
+    fn resolve_function(&mut self, function: &Function) -> CompilerResult<Type> {
+        self.begin_scope(); // TODO: Is it necessary?
+        let mut params = Vec::new();
         for Param { name, ty } in &function.params {
-            let param_ty = self.resolve_ty(ty);
-            self.declare(&name.symbol, ResolveState::Resolved(param_ty?), || {
+            let param_ty = self.resolve_ty(ty)?;
+            params.push(TypedName {
+                name: name.symbol.clone(),
+                ty: Rc::new(param_ty.clone()),
+            });
+            self.declare(&name.symbol, ResolveState::Resolved(param_ty), || {
                 error!(
                     name.node.span,
                     "Parameter '{}' is already defined", name.symbol
@@ -208,7 +232,16 @@ impl Resolver {
         }
         self.resolve_stmt(&function.body)?;
         self.end_scope();
-        Ok(())
+
+        let return_ty = match &function.return_ty {
+            Some(t) => self.resolve_ty(t)?,
+            None => Type::Void,
+        };
+
+        Ok(Type::Function {
+            params: Rc::from(params),
+            return_ty: Rc::from(return_ty),
+        })
     }
 
     fn resolve_stmt(&mut self, statement: &Stmt) -> CompilerResult<()> {
@@ -226,21 +259,33 @@ impl Resolver {
             }
 
             StmtKind::Declaration { name, ty, value } => {
-                let var_type = self.resolve_ty(&ty)?;
-                self.declare(&name.symbol, ResolveState::Resolved(var_type), || {
+                let var_ty = self.resolve_ty(&ty)?;
+                self.declare(&name.symbol, ResolveState::Resolved(var_ty.clone()), || {
                     error!(
                         name.node.span,
                         "Variable '{}' was already declared in this scope", name.symbol
                     )
                 })?;
                 if let Some(value) = value {
-                    self.resolve_expr(value)?;
+                    let initializer_ty = self.resolve_expr(value)?;
+                    if var_ty != initializer_ty {
+                        return Err(error!(
+                            value.node.span,
+                            "Type Error: expected {var_ty:?} but found {initializer_ty:?}"
+                        ));
+                    }
                 }
             }
 
             StmtKind::Assignment { target, value } => {
-                self.resolve_expr(target)?;
-                self.resolve_expr(value)?;
+                let target_ty = self.resolve_expr(target)?;
+                let value_ty = self.resolve_expr(value)?;
+                if target_ty != value_ty {
+                    return Err(error!(
+                        value.node.span,
+                        "Type Error: expected {target_ty:?} but found {value_ty:?}"
+                    ));
+                }
             }
 
             StmtKind::If {
@@ -248,17 +293,32 @@ impl Resolver {
                 then_block,
                 else_block,
             } => {
-                self.resolve_expr(condition)?;
+                let condition_ty = self.resolve_expr(condition)?;
+                if condition_ty != Type::Bool {
+                    return Err(error!(
+                        condition.node.span,
+                        "Type Error: condition should be 'bool', but got {condition_ty:?}"
+                    ));
+                }
                 self.resolve_stmt(then_block)?;
-                else_block.as_ref().map(|b| self.resolve_stmt(b));
+                if let Some(e) = else_block {
+                    self.resolve_stmt(e)?;
+                }
             }
 
             StmtKind::While { condition, body } => {
-                self.resolve_expr(condition)?;
+                let condition_ty = self.resolve_expr(condition)?;
+                if condition_ty != Type::Bool {
+                    return Err(error!(
+                        condition.node.span,
+                        "Type Error: condition should be 'bool', but got {condition_ty:?}"
+                    ));
+                }
                 self.resolve_stmt(body)?
             }
 
             StmtKind::Return { expr } => {
+                // TODO!
                 self.resolve_expr(expr)?;
             }
         }
@@ -379,35 +439,43 @@ impl Resolver {
                         return Ok(Type::Void);
                     }
 
-                    // let sig = self.symbol_table.lookup_function(ident)?;
+                    let callee_ty = self.lookup(ident, || {
+                        error!(ident.node.span, "Unknown function '{}'", ident.symbol)
+                    })?;
 
-                    // if args.len() != sig.params.len() {
-                    //     return Err(error!(
-                    //         expr.node.span,
-                    //         "Function called with incorrect number of arguments",
-                    //     ));
-                    // }
+                    let Type::Function { params, return_ty } = callee_ty else {
+                        return Err(error!(
+                            ident.node.span,
+                            "'{}' is not a function", ident.symbol
+                        )); // TODO: Test
+                    };
+
+                    if args.len() != params.len() {
+                        return Err(error!(
+                            expr.node.span,
+                            "Function called with incorrect number of arguments",
+                        ));
+                    }
                     for (i, arg) in args.iter().enumerate() {
                         let arg_ty = self.resolve_expr(arg)?;
-                        // let param_ty = &sig.params[i];
-                        // if arg_ty != *param_ty {
-                        //     return Err(error!(
-                        //         arg.node.span,
-                        //         "Type Error: argument type mismatch",
-                        //     ));
-                        // }
+                        let param_ty = &params[i].ty;
+                        if arg_ty != **param_ty {
+                            return Err(error!(
+                                arg.node.span,
+                                "Type Error: argument type mismatch",
+                            ));
+                        }
                     }
-                    // sig.return_ty.clone()
-                    Type::Void
+                    (*return_ty).clone()
                 } else {
                     return Err(error!(
                         callee.node.span,
-                        "First class functions not supported",
+                        "First class functions not supported", // TODO: Test this
                     ));
                 }
             }
         };
-        self.expr_types.insert(expr.node.id, ty.clone());
+        self.node_types.insert(expr.node.id, ty.clone());
         Ok(ty)
     }
 
