@@ -555,7 +555,7 @@ fn test_already_declared_var() {
         export fn main() {
             let x int = 1
             let x int = 2
-              //^ Compiler Error: Variable 'x' was already declared in this scope
+              //^ Compiler Error: Variable 'x' is already declared in this scope
         }"#,
     );
 }
@@ -565,7 +565,7 @@ fn test_already_declared_param() {
     assert_error(
         r#"
         fn foo(a int, a float) {
-                    //^ Compiler Error: Parameter 'a' is already defined
+                    //^ Compiler Error: Parameter 'a' is already declared
         }
         export fn main() {
         }"#,

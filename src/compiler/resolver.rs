@@ -1,13 +1,13 @@
-use std::collections::{HashMap, VecDeque};
-use std::collections::hash_map::Entry;
-use std::rc::Rc;
 use crate::ast;
 use crate::ast::{
     BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module, NodeId,
     Param, Stmt, StmtKind, Symbol, TypeParam, UnOpKind,
 };
-use crate::error::{CompilerError, CompilerResult, error};
+use crate::error::{error, CompilerError, CompilerResult};
 use crate::lexer::Span;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, VecDeque};
+use std::rc::Rc;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Type {
@@ -44,43 +44,20 @@ enum ResolveState {
 #[derive(Default)]
 pub struct Resolver {
     module_types: HashMap<Symbol, ResolveState>,
-    scopes: VecDeque<HashMap<Symbol, Type>>,
     pub node_types: HashMap<NodeId, Type>,
+    scopes: VecDeque<HashMap<Symbol, Type>>,
+    context_function: Option<Type>,
 }
 
 impl Resolver {
-    fn declare_local(&mut self, identifier: &Identifier, ty: Type) -> CompilerResult<()> {
-        // TODO: Think about panics
-        let scope = self.scopes.front_mut().expect("There should be at least one scope available");
-
-        if scope.contains_key(&identifier.symbol) {
-            return Err(error!(identifier.node.span,"Variable '{}' was already declared in this scope", identifier.symbol));
-        }
-
-        scope.insert(identifier.symbol.clone(), ty);
-        Ok(())
-    }
-
-    fn lookup_local(&mut self, ident: &Identifier) -> CompilerResult<Type> {
-        return self.scopes.iter()
-            .find_map(|scope| scope.get(&ident.symbol))
-            .cloned()
-            .ok_or_else(|| error!(ident.node.span, "Undeclared variable '{}'", ident.symbol))
-    }
-
-    fn begin_scope(&mut self) {
-        self.scopes.push_front(Default::default())
-    }
-
-    fn end_scope(&mut self) {
-        self.scopes.pop_front();
-    }
-
-    fn declare_type(&mut self, name: Symbol, state: ResolveState, err: impl Fn() -> CompilerError) -> CompilerResult<()> {
+    fn declare_type(
+        &mut self,
+        name: Symbol,
+        state: ResolveState,
+        err: impl Fn() -> CompilerError,
+    ) -> CompilerResult<()> {
         match self.module_types.entry(name) {
-            Entry::Occupied(_) => {
-                Err(err())
-            }
+            Entry::Occupied(_) => Err(err()),
             Entry::Vacant(v) => {
                 v.insert(state);
                 Ok(())
@@ -88,13 +65,9 @@ impl Resolver {
         }
     }
 
-    fn declare_builtin(&mut self, name: &str, ty: Type) -> CompilerResult<()> {
-        self.declare_type(Symbol::from(name), ResolveState::Resolved(ty), || error!(Span(0, 0), "Builtin '{name}' is already declared"))
-    }
-
     fn lookup_type(&mut self, ident: &Identifier) -> CompilerResult<Type> {
         let Some(state) = self.module_types.get_mut(&ident.symbol) else {
-            return Err(error!(ident.node.span, "Unknown type '{}'", ident.symbol))
+            return Err(error!(ident.node.span, "Unknown type '{}'", ident.symbol));
         };
 
         let ty = match state {
@@ -117,6 +90,49 @@ impl Resolver {
         let state = self.module_types.get_mut(&ident.symbol).unwrap();
         *state = ResolveState::Resolved(ty.clone());
         Ok(ty)
+    }
+
+    fn declare_local(
+        &mut self,
+        identifier: &Identifier,
+        ty: Type,
+        err: impl Fn() -> CompilerError,
+    ) -> CompilerResult<()> {
+        // TODO: Think about panics
+        let scope = self
+            .scopes
+            .front_mut()
+            .expect("There should be at least one scope available");
+
+        if scope.contains_key(&identifier.symbol) {
+            return Err(err());
+        }
+
+        scope.insert(identifier.symbol.clone(), ty);
+        Ok(())
+    }
+
+    fn lookup_local(&mut self, ident: &Identifier) -> CompilerResult<Type> {
+        return self
+            .scopes
+            .iter()
+            .find_map(|scope| scope.get(&ident.symbol))
+            .cloned()
+            .ok_or_else(|| error!(ident.node.span, "Undeclared variable '{}'", ident.symbol));
+    }
+
+    fn begin_scope(&mut self) {
+        self.scopes.push_front(Default::default())
+    }
+
+    fn end_scope(&mut self) {
+        self.scopes.pop_front();
+    }
+
+    fn declare_builtin(&mut self, name: &str, ty: Type) -> CompilerResult<()> {
+        self.declare_type(Symbol::from(name), ResolveState::Resolved(ty), || {
+            error!(Span(0, 0), "Builtin '{name}' is already declared")
+        })
     }
 
     fn declare_builtins(&mut self) -> CompilerResult<()> {
@@ -159,7 +175,17 @@ impl Resolver {
             self.declare_type(
                 name.symbol.clone(),
                 ResolveState::Unresolved(item.clone()),
-                || error!(name.node.span,"{} '{}' was already defined", match item.kind {  ItemKind::Function(_) => "Function", ItemKind::Record(_) => "Record" }, name.symbol),
+                || {
+                    error!(
+                        name.node.span,
+                        "{} '{}' was already defined",
+                        match item.kind {
+                            ItemKind::Function(_) => "Function",
+                            ItemKind::Record(_) => "Record",
+                        },
+                        name.symbol
+                    )
+                },
             )?;
         }
 
@@ -230,37 +256,47 @@ impl Resolver {
     }
 
     fn check_function(&mut self, function: &Function) -> CompilerResult<()> {
+        self.context_function = Some(self.lookup_type(&function.name)?);
         self.begin_scope(); // TODO: Is it necessary?
         for Param { name, ty } in &function.params {
             let param_ty = self.lookup_type(&ty.name)?;
-            self.declare_local(&name, param_ty)
-                .map_err(|e| error!(e.span, "Parameter '{}' is already defined", name.symbol))?; // TODO: Test this?
+            self.declare_local(&name, param_ty, || {
+                error!(
+                    name.node.span,
+                    "Parameter '{}' is already declared", name.symbol
+                )
+            })?
         }
-        self.resolve_stmt(&function.body)?;
+        self.check_stmt(&function.body)?;
         self.end_scope();
-
+        self.context_function = None;
         Ok(())
     }
 
-    fn resolve_stmt(&mut self, statement: &Stmt) -> CompilerResult<()> {
-        match &statement.kind {
+    fn check_stmt(&mut self, stmt: &Stmt) -> CompilerResult<()> {
+        match &stmt.kind {
             StmtKind::Block { statements } => {
                 self.begin_scope();
                 for statement in statements {
-                    self.resolve_stmt(statement)?
+                    self.check_stmt(statement)?
                 }
                 self.end_scope();
             }
 
             StmtKind::ExprStmt(expr) => {
-                self.resolve_expr(expr)?;
+                self.check_expr(expr)?;
             }
 
             StmtKind::Declaration { name, ty, value } => {
                 let var_ty = self.resolve_ty(&ty)?;
-                self.declare_local(&name, var_ty.clone())?;
+                self.declare_local(&name, var_ty.clone(), || {
+                    error!(
+                        name.node.span,
+                        "Variable '{}' is already declared in this scope", name.symbol
+                    )
+                })?;
                 if let Some(value) = value {
-                    let initializer_ty = self.resolve_expr(value)?;
+                    let initializer_ty = self.check_expr(value)?;
                     if var_ty != initializer_ty {
                         return Err(error!(
                             value.node.span,
@@ -271,8 +307,8 @@ impl Resolver {
             }
 
             StmtKind::Assignment { target, value } => {
-                let target_ty = self.resolve_expr(target)?;
-                let value_ty = self.resolve_expr(value)?;
+                let target_ty = self.check_expr(target)?;
+                let value_ty = self.check_expr(value)?;
                 if target_ty != value_ty {
                     return Err(error!(
                         value.node.span,
@@ -286,39 +322,48 @@ impl Resolver {
                 then_block,
                 else_block,
             } => {
-                let condition_ty = self.resolve_expr(condition)?;
+                let condition_ty = self.check_expr(condition)?;
                 if condition_ty != Type::Bool {
                     return Err(error!(
                         condition.node.span,
                         "Type Error: condition should be 'bool', but got {condition_ty:?}"
                     ));
                 }
-                self.resolve_stmt(then_block)?;
+                self.check_stmt(then_block)?;
                 if let Some(e) = else_block {
-                    self.resolve_stmt(e)?;
+                    self.check_stmt(e)?;
                 }
             }
 
             StmtKind::While { condition, body } => {
-                let condition_ty = self.resolve_expr(condition)?;
+                let condition_ty = self.check_expr(condition)?;
                 if condition_ty != Type::Bool {
                     return Err(error!(
                         condition.node.span,
                         "Type Error: condition should be 'bool', but got {condition_ty:?}"
                     ));
                 }
-                self.resolve_stmt(body)?
+                self.check_stmt(body)?
             }
 
             StmtKind::Return { expr } => {
-                // TODO!
-                self.resolve_expr(expr)?;
+                let Some(Type::Function { return_ty, .. }) = self.context_function.clone() else {
+                    return Err(error!(stmt.node.span, "Return outside of a function"));
+                };
+                let expr_ty = self.check_expr(expr)?;
+                if expr_ty != *return_ty {
+                    return Err(error!(
+                        stmt.node.span,
+                        "Type Error: return type mismatch, expected {return_ty:?}, but found {expr_ty:?}"
+                    ));
+                }
+                self.check_expr(expr)?;
             }
         }
         Ok(())
     }
 
-    fn resolve_expr(&mut self, expr: &Expr) -> CompilerResult<Type> {
+    fn check_expr(&mut self, expr: &Expr) -> CompilerResult<Type> {
         let ty = match &expr.kind {
             ExprKind::Literal(LiteralKind::Int(_)) => Type::Int,
             ExprKind::Literal(LiteralKind::Float(_)) => Type::Float,
@@ -326,14 +371,14 @@ impl Resolver {
             ExprKind::Literal(LiteralKind::Bool(_)) => Type::Bool,
             ExprKind::Variable(ident) => self.lookup_local(ident)?,
             ExprKind::ArrayIndex { expr, index } => {
-                let Type::Int = self.resolve_expr(index)? else {
+                let Type::Int = self.check_expr(index)? else {
                     return Err(error!(
                         index.node.span,
                         "Type Error: Array index must be Int"
                     ));
                 };
 
-                let expr_ty = self.resolve_expr(expr)?;
+                let expr_ty = self.check_expr(expr)?;
 
                 let Type::Array { inner, .. } = expr_ty else {
                     return Err(error!(
@@ -344,7 +389,7 @@ impl Resolver {
                 (*inner).clone()
             }
             ExprKind::FieldAccess { expr, field } => {
-                let expr_ty = self.resolve_expr(expr)?;
+                let expr_ty = self.check_expr(expr)?;
                 let Type::Record { fields } = expr_ty else {
                     return Err(error!(
                         expr.node.span,
@@ -364,8 +409,8 @@ impl Resolver {
                 right,
                 operator,
             } => {
-                let left_ty = self.resolve_expr(left)?;
-                let right_ty = self.resolve_expr(right)?;
+                let left_ty = self.check_expr(left)?;
+                let right_ty = self.check_expr(right)?;
 
                 if left_ty != right_ty {
                     return Err(error!(
@@ -407,7 +452,7 @@ impl Resolver {
             }
 
             ExprKind::Unary { operator, right } => {
-                let right_ty = self.resolve_expr(right)?;
+                let right_ty = self.check_expr(right)?;
                 if operator.kind == UnOpKind::Not && right_ty != Type::Bool {
                     return Err(error!(
                         right.node.span,
@@ -444,7 +489,7 @@ impl Resolver {
                         ));
                     }
                     for (i, arg) in args.iter().enumerate() {
-                        let arg_ty = self.resolve_expr(arg)?;
+                        let arg_ty = self.check_expr(arg)?;
                         let param_ty = &params[i].ty;
                         if arg_ty != **param_ty {
                             return Err(error!(
@@ -466,19 +511,19 @@ impl Resolver {
         Ok(ty)
     }
 
-    fn resolve_ty(&mut self, ty: &ast::Type) -> CompilerResult<Type> {
+    fn resolve_ty(&mut self, ast_ty: &ast::Type) -> CompilerResult<Type> {
         // TODO: This is sort of a hack!
-        if ty.name.symbol.as_str() == "Array" {
-            let mut params = ty.params.iter();
+        if ast_ty.name.symbol.as_str() == "Array" {
+            let mut params = ast_ty.params.iter();
             let Some(TypeParam::Type(inner)) = params.next() else {
                 return Err(error!(
-                    ty.node.span,
+                    ast_ty.node.span,
                     "Array requires a valid inner type parameter",
                 ));
             };
             let Some(TypeParam::Const(size)) = params.next() else {
                 return Err(error!(
-                    ty.node.span,
+                    ast_ty.node.span,
                     "Array requires a valid size type parameter",
                 ));
             };
@@ -489,7 +534,8 @@ impl Resolver {
             });
         }
 
-        // TODO: ????
-        return self.lookup_type(&ty.name);
+        let ty = self.lookup_type(&ast_ty.name)?;
+        self.node_types.insert(ast_ty.node.id, ty.clone());
+        Ok(ty)
     }
 }

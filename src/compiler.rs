@@ -7,11 +7,12 @@ use wasm_encoder::{
     ValType,
 };
 
+use crate::ast;
 use crate::ast::{
     BinOpKind, Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind,
     Symbol, UnOpKind,
 };
-use crate::compiler::resolution::{Address, FnSignature, SymbolTable};
+use crate::compiler::resolution::{Address, SymbolTable};
 use crate::compiler::resolver::{Resolver, Type};
 use crate::error::{error, CompilerResult};
 use crate::lexer::Span;
@@ -21,7 +22,6 @@ mod resolution;
 mod resolver;
 #[cfg(test)]
 mod test;
-mod typecheck;
 
 #[derive(Clone, Copy)]
 struct WasmStr {
@@ -70,6 +70,19 @@ impl Ty {
     }
 }
 
+impl Type {
+    fn as_wasm(&self) -> CompilerResult<ValType> {
+        match self {
+            Type::Int | Type::Bool | Type::Array { .. } | Type::Record { .. } => Ok(ValType::I32), // TODO: specify
+            Type::Float => Ok(ValType::F64),
+            _ => Err(error!(
+                Span(0, 0),
+                "{self:?} type does not have a wasm equivalent"
+            )),
+        }
+    }
+}
+
 #[derive(Default)]
 struct Counter(u32);
 
@@ -86,7 +99,7 @@ struct Compiler {
     strings: HashMap<NodeId, WasmStr>,
     symbol_table: SymbolTable,
     node_types: HashMap<NodeId, Type>,
-    current_function: Option<Rc<FnSignature>>,
+
     types: TypeSection,
     functions: FunctionSection,
     memories: MemorySection,
@@ -100,15 +113,22 @@ struct Compiler {
 impl Compiler {
     const MEM: u32 = 0;
 
+    fn lookup_type(&self, ast_ty: &ast::Type) -> CompilerResult<Type> {
+        self.node_types
+            .get(&ast_ty.node.id)
+            .cloned()
+            .ok_or_else(|| error!(ast_ty.node.span, "Fatal: unresolved type"))
+    }
+
     fn function(&mut self, function: &Function) -> CompilerResult<()> {
         // Declare type
         let mut params = Vec::new();
         for param in &function.params {
-            let ty = self.symbol_table.lookup_type(&param.ty)?;
+            let ty = self.lookup_type(&param.ty)?;
             params.push(ty.as_wasm()?)
         }
         let returns: &[ValType] = if let Some(return_ty) = &function.return_ty {
-            &[self.symbol_table.lookup_type(&return_ty)?.as_wasm()?]
+            &[self.lookup_type(&return_ty)?.as_wasm()?]
         } else {
             &[]
         };
@@ -220,7 +240,6 @@ impl Compiler {
                     };
                     func.instruction(&instruction);
                 }
-                ExprKind::FieldAccess { expr, field } => {}
                 _ => {
                     return Err(error!(
                         stmt.node.span,
