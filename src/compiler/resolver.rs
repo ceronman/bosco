@@ -1,7 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::collections::hash_map::Entry;
 use std::rc::Rc;
-
 use crate::ast;
 use crate::ast::{
     BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module, NodeId,
@@ -44,7 +43,7 @@ enum ResolveState {
 
 #[derive(Default)]
 pub struct Resolver {
-    item_types: HashMap<Symbol, ResolveState>,
+    module_types: HashMap<Symbol, ResolveState>,
     scopes: VecDeque<HashMap<Symbol, Type>>,
     pub node_types: HashMap<NodeId, Type>,
 }
@@ -77,8 +76,8 @@ impl Resolver {
         self.scopes.pop_front();
     }
 
-    fn declare_item(&mut self, name: Symbol, state: ResolveState, err: impl Fn() -> CompilerError) -> CompilerResult<()> {
-        match self.item_types.entry(name) {
+    fn declare_type(&mut self, name: Symbol, state: ResolveState, err: impl Fn() -> CompilerError) -> CompilerResult<()> {
+        match self.module_types.entry(name) {
             Entry::Occupied(_) => {
                 Err(err())
             }
@@ -90,11 +89,11 @@ impl Resolver {
     }
 
     fn declare_builtin(&mut self, name: &str, ty: Type) -> CompilerResult<()> {
-        self.declare_item(Symbol::from(name), ResolveState::Resolved(ty), || error!(Span(0, 0), "Builtin '{name}' is already declared"))
+        self.declare_type(Symbol::from(name), ResolveState::Resolved(ty), || error!(Span(0, 0), "Builtin '{name}' is already declared"))
     }
 
-    fn lookup_item(&mut self, ident: &Identifier) -> CompilerResult<Type> {
-        let Some(state) = self.item_types.get_mut(&ident.symbol) else {
+    fn lookup_type(&mut self, ident: &Identifier) -> CompilerResult<Type> {
+        let Some(state) = self.module_types.get_mut(&ident.symbol) else {
             return Err(error!(ident.node.span, "Unknown type '{}'", ident.symbol))
         };
 
@@ -115,12 +114,12 @@ impl Resolver {
             }
         };
 
-        let state = self.item_types.get_mut(&ident.symbol).unwrap();
+        let state = self.module_types.get_mut(&ident.symbol).unwrap();
         *state = ResolveState::Resolved(ty.clone());
         Ok(ty)
     }
 
-    fn collect_top_level_types(&mut self, module: &Module) -> CompilerResult<()> {
+    fn declare_builtins(&mut self) -> CompilerResult<()> {
         self.declare_builtin("void", Type::Void)?;
         self.declare_builtin("int", Type::Int)?;
         self.declare_builtin("float", Type::Float)?;
@@ -147,63 +146,44 @@ impl Resolver {
                 return_ty: Rc::new(Type::Void),
             },
         )?;
+        Ok(())
+    }
+
+    fn collect_top_level_types(&mut self, module: &Module) -> CompilerResult<()> {
+        for item in &module.items {
+            // TODO: Make name a shared field for item
+            let name = match &item.kind {
+                ItemKind::Function(f) => &f.name,
+                ItemKind::Record(r) => &r.name,
+            };
+            self.declare_type(
+                name.symbol.clone(),
+                ResolveState::Unresolved(item.clone()),
+                || error!(name.node.span,"{} '{}' was already defined", match item.kind {  ItemKind::Function(_) => "Function", ItemKind::Record(_) => "Record" }, name.symbol),
+            )?;
+        }
 
         for item in &module.items {
-            match &item.kind {
-                ItemKind::Function(function) => {
-                    self.declare_item(
-                        function.name.symbol.clone(),
-                        ResolveState::Unresolved(item.clone()),
-                        || {
-                            error!(
-                                function.name.node.span,
-                                "Function '{}' was already defined", function.name.symbol
-                            )
-                        },
-                    )?;
-                }
-                ItemKind::Record(record) => {
-                    self.declare_item(
-                        record.name.symbol.clone(),
-                        ResolveState::Unresolved(item.clone()),
-                        || {
-                            error!(
-                                record.name.node.span,
-                                "Record '{}' was already defined", record.name.symbol
-                            )
-                        },
-                    )?;
-                }
-            }
-        }
-        
-        for item in &module.items {
-            match &item.kind {
-                ItemKind::Function(f) => { self.lookup_item(&f.name)?; }
-                ItemKind::Record(r) => { self.lookup_item(&r.name)?; }
-            }
+            let name = match &item.kind {
+                ItemKind::Function(f) => &f.name,
+                ItemKind::Record(r) => &r.name,
+            };
+            self.lookup_type(name)?;
         }
 
         Ok(())
     }
 
     pub fn resolve(&mut self, module: &Module) -> CompilerResult<()> {
+        self.declare_builtins()?;
         self.collect_top_level_types(module)?;
 
         self.begin_scope();
 
-        for (symbol, state) in self.item_types.iter_mut() {
-            // TODO: awful! improve!
-            let ResolveState::Resolved(ty) = state else {
-                panic!("There were unresolved module items!")
-            };
-            self.scopes.front_mut().unwrap().insert(symbol.clone(), ty.clone());
-        }
-
         for item in &module.items {
             match &item.kind {
                 ItemKind::Function(f) => self.check_function(f)?,
-                ItemKind::Record(_) => {}
+                _ => {}
             }
         }
         self.end_scope();
@@ -252,8 +232,9 @@ impl Resolver {
     fn check_function(&mut self, function: &Function) -> CompilerResult<()> {
         self.begin_scope(); // TODO: Is it necessary?
         for Param { name, ty } in &function.params {
-            let param_ty = self.lookup_item(&ty.name)?;
-            self.declare_local(&name, param_ty)?; // TODO: Test this?
+            let param_ty = self.lookup_type(&ty.name)?;
+            self.declare_local(&name, param_ty)
+                .map_err(|e| error!(e.span, "Parameter '{}' is already defined", name.symbol))?; // TODO: Test this?
         }
         self.resolve_stmt(&function.body)?;
         self.end_scope();
@@ -449,9 +430,7 @@ impl Resolver {
                         return Ok(Type::Void);
                     }
 
-                    let callee_ty = self.lookup_local(ident)?; // TODO: Test this?
-
-                    let Type::Function { params, return_ty } = callee_ty else {
+                    let Type::Function { params, return_ty } = self.lookup_type(ident)? else {
                         return Err(error!(
                             ident.node.span,
                             "'{}' is not a function", ident.symbol
@@ -511,6 +490,6 @@ impl Resolver {
         }
 
         // TODO: ????
-        return self.lookup_item(&ty.name);
+        return self.lookup_type(&ty.name);
     }
 }
