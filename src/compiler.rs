@@ -120,18 +120,23 @@ impl Compiler {
             .ok_or_else(|| error!(ast_ty.node.span, "Fatal: unresolved type"))
     }
 
-    fn function(&mut self, function: &Function) -> CompilerResult<()> {
-        // Declare type
-        let mut params = Vec::new();
-        for param in &function.params {
-            let ty = self.lookup_type(&param.ty)?;
-            params.push(ty.as_wasm()?)
-        }
-        let returns: &[ValType] = if let Some(return_ty) = &function.return_ty {
-            &[self.lookup_type(&return_ty)?.as_wasm()?]
-        } else {
-            &[]
+    // TODO: Make Type::Function a concrete type
+    fn lookup_function(&self, f: &ast::Function) -> CompilerResult<Type> {
+        self.node_types
+            .get(&f.name.node.id)
+            .cloned()
+            .ok_or_else(|| error!(f.name.node.span, "Fatal: unresolved function"))
+    }
+
+    fn function(&mut self, function: &ast::Function) -> CompilerResult<()> {
+        let Type::Function { params, return_ty } = self.lookup_function(&function)? else {
+            return Err(error!(function.name.node.span, "Fatal: invalid function"))
         };
+        let params = params
+            .iter()
+            .map(|p| p.as_wasm())
+            .collect::<CompilerResult<Vec<ValType>>>()?;
+        let returns: &[ValType] = if *return_ty == Type::Void { &[] } else { &[return_ty.as_wasm()?] };
         let type_index = self.types.len();
         self.types.function(params, returns.iter().copied());
         self.functions.function(type_index);
@@ -145,7 +150,9 @@ impl Compiler {
             .collect::<CompilerResult<Vec<_>>>()?
             .into_iter()
             .map(|t| (1, t));
+
         let mut wasm_function = wasm_encoder::Function::new(locals);
+
         self.statement(&mut wasm_function, &function.body)?;
         wasm_function.instruction(&Instruction::End);
         self.codes.function(&wasm_function);

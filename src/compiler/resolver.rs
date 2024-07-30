@@ -23,15 +23,15 @@ pub enum Type {
         fields: Rc<[TypedName]>,
     },
     Function {
-        params: Rc<[TypedName]>,
+        params: Rc<[Type]>,
         return_ty: Rc<Type>,
     },
 }
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct TypedName {
-    name: Symbol,
-    ty: Rc<Type>,
+    pub name: Symbol,
+    pub ty: Rc<Type>,
 }
 
 #[derive(Debug)]
@@ -145,20 +145,14 @@ impl Resolver {
         self.declare_builtin(
             "print_int",
             Type::Function {
-                params: Rc::new([TypedName {
-                    name: Symbol::from("value"),
-                    ty: Rc::new(Type::Int),
-                }]),
+                params: Rc::new([Type::Int]),
                 return_ty: Rc::new(Type::Void),
             },
         )?;
         self.declare_builtin(
             "print_float",
             Type::Function {
-                params: Rc::new([TypedName {
-                    name: Symbol::from("value"),
-                    ty: Rc::new(Type::Float),
-                }]),
+                params: Rc::new([Type::Float]),
                 return_ty: Rc::new(Type::Void),
             },
         )?;
@@ -194,7 +188,8 @@ impl Resolver {
                 ItemKind::Function(f) => &f.name,
                 ItemKind::Record(r) => &r.name,
             };
-            self.lookup_type(name)?;
+            let ty = self.lookup_type(name)?;
+            self.node_types.insert(name.node.id, ty);
         }
 
         Ok(())
@@ -220,14 +215,9 @@ impl Resolver {
     fn resolve_item(&mut self, item: &Item) -> CompilerResult<Type> {
         let ty = match &item.kind {
             ItemKind::Function(function) => {
-                let mut params = Vec::new();
-                for Param { name, ty } in &function.params {
-                    let param_ty = self.resolve_ty(ty)?;
-                    params.push(TypedName {
-                        name: name.symbol.clone(),
-                        ty: Rc::new(param_ty.clone()),
-                    });
-                }
+                let params= function.params
+                    .iter().map(|p| self.resolve_ty(&p.ty))
+                    .collect::<CompilerResult<Vec<Type>>>()?;
 
                 let return_ty = match &function.return_ty {
                     Some(t) => self.resolve_ty(t)?,
@@ -490,8 +480,8 @@ impl Resolver {
                     }
                     for (i, arg) in args.iter().enumerate() {
                         let arg_ty = self.check_expr(arg)?;
-                        let param_ty = &params[i].ty;
-                        if arg_ty != **param_ty {
+                        let param_ty = &params[i];
+                        if arg_ty != *param_ty {
                             return Err(error!(
                                 arg.node.span,
                                 "Type Error: argument type mismatch",
