@@ -279,6 +279,7 @@ impl Resolver {
 
             StmtKind::Declaration { name, ty, value } => {
                 let var_ty = self.resolve_ty(&ty)?;
+                self.node_types.insert(name.node.id, var_ty.clone());
                 self.declare_local(&name, var_ty.clone(), || {
                     error!(
                         name.node.span,

@@ -8,13 +8,10 @@ use wasm_encoder::{
 };
 
 use crate::ast;
-use crate::ast::{
-    BinOpKind, Expr, ExprKind, Function, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind,
-    Symbol, UnOpKind,
-};
+use crate::ast::{BinOpKind, Expr, ExprKind, Identifier, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind, Symbol, UnOpKind};
 use crate::compiler::resolution::{Address, SymbolTable};
 use crate::compiler::resolver::{Resolver, Type};
-use crate::error::{error, CompilerResult};
+use crate::error::{CompilerResult, error};
 use crate::lexer::Span;
 use crate::parser::parse;
 
@@ -44,6 +41,20 @@ pub enum Ty {
 pub struct Field {
     name: Symbol,
     ty: Rc<Ty>,
+}
+
+impl Type {
+    fn size(&self) -> u32 {
+        match self {
+            Type::Void => 0,
+            Type::Int => 4,
+            Type::Float => 8,
+            Type::Bool => 1,
+            Type::Array { inner, size } => inner.size() * size,
+            Type::Record { fields } => fields.iter().map(|f| f.ty.size()).sum(),
+            Type::Function { .. } => todo!()
+        }
+    }
 }
 
 impl Ty {
@@ -99,6 +110,9 @@ struct Compiler {
     strings: HashMap<NodeId, WasmStr>,
     symbol_table: SymbolTable,
     node_types: HashMap<NodeId, Type>,
+    addresses: HashMap<NodeId, Address>,
+    stack_pointer: u32,
+    local_counter: Counter,
 
     types: TypeSection,
     functions: FunctionSection,
@@ -113,19 +127,19 @@ struct Compiler {
 impl Compiler {
     const MEM: u32 = 0;
 
-    fn lookup_type(&self, ast_ty: &ast::Type) -> CompilerResult<Type> {
-        self.node_types
-            .get(&ast_ty.node.id)
-            .cloned()
-            .ok_or_else(|| error!(ast_ty.node.span, "Fatal: unresolved type"))
-    }
-
     // TODO: Make Type::Function a concrete type
     fn lookup_function(&self, f: &ast::Function) -> CompilerResult<Type> {
         self.node_types
             .get(&f.name.node.id)
             .cloned()
             .ok_or_else(|| error!(f.name.node.span, "Fatal: unresolved function"))
+    }
+
+    fn lookup_ty(&self, identifier: &Identifier) -> CompilerResult<Type> {
+        self.node_types
+            .get(&identifier.node.id)
+            .cloned()
+            .ok_or_else(|| error!(identifier.node.span, "Fatal: unresolved '{}'", identifier.symbol))
     }
 
     fn function(&mut self, function: &ast::Function) -> CompilerResult<()> {
@@ -151,6 +165,8 @@ impl Compiler {
             .into_iter()
             .map(|t| (1, t));
 
+        self.local_counter.0 = 0; // TODO :(
+        
         let mut wasm_function = wasm_encoder::Function::new(locals);
 
         self.statement(&mut wasm_function, &function.body)?;
@@ -195,10 +211,22 @@ impl Compiler {
             }
 
             StmtKind::Declaration { name, value, .. } => {
+                let ty = self.lookup_ty(name)?;
+                let address = match ty {
+                    Type::Void => Address::None,
+                    Type::Int | Type::Float | Type::Bool  => Address::Var(self.local_counter.next()),
+                    Type::Array { .. } |
+                    Type::Record { .. } |
+                    Type::Function { .. } => {
+                        let pointer = self.stack_pointer;
+                        self.stack_pointer += ty.size();
+                        Address::Mem(pointer)
+                    }
+                };
+                
                 if let Some(value) = value {
-                    let local_var = self.symbol_table.lookup_var(name)?;
                     self.expression(func, value)?; // TODO: Define what to do when declared var is used in initializer
-                    match local_var.address {
+                    match address {
                         Address::Var(index) => {
                             func.instruction(&Instruction::LocalSet(index));
                         }
@@ -206,6 +234,8 @@ impl Compiler {
                         Address::None => {}
                     }
                 }
+
+                self.addresses.insert(name.node.id, address);
             }
 
             StmtKind::Assignment { target, value } => match &target.kind {
@@ -501,8 +531,8 @@ impl Compiler {
                     Address::Var(index) => {
                         func.instruction(&Instruction::LocalGet(index));
                     }
-                    Address::Mem(addr) => {
-                        func.instruction(&Instruction::I32Const(addr as i32));
+                    Address::Mem(_) => {
+                        panic!("Should not happen")
                     }
                     Address::None => {}
                 }
