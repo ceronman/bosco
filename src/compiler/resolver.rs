@@ -15,17 +15,15 @@ pub enum Type {
     Int,
     Float,
     Bool,
-    Array {
-        inner: Rc<Type>,
-        size: u32,
-    },
-    Record {
-        fields: Rc<[TypedName]>,
-    },
-    Function {
-        params: Rc<[Type]>,
-        return_ty: Rc<Type>,
-    },
+    Array { inner: Rc<Type>, size: u32 },
+    Record { fields: Rc<[TypedName]> },
+    Function(Signature),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Signature {
+    pub params: Rc<[Type]>,
+    pub return_ty: Rc<Type>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -44,9 +42,9 @@ enum ResolveState {
 #[derive(Default)]
 pub struct Resolver {
     module_types: HashMap<Symbol, ResolveState>,
-    pub node_types: HashMap<NodeId, Type>,
     scopes: VecDeque<HashMap<Symbol, Type>>,
     context_function: Option<Type>,
+    pub node_types: HashMap<NodeId, Type>,
 }
 
 impl Resolver {
@@ -144,17 +142,17 @@ impl Resolver {
         // TODO: Define proper imports
         self.declare_builtin(
             "print_int",
-            Type::Function {
+            Type::Function(Signature {
                 params: Rc::new([Type::Int]),
                 return_ty: Rc::new(Type::Void),
-            },
+            }),
         )?;
         self.declare_builtin(
             "print_float",
-            Type::Function {
+            Type::Function(Signature {
                 params: Rc::new([Type::Float]),
                 return_ty: Rc::new(Type::Void),
-            },
+            }),
         )?;
         Ok(())
     }
@@ -215,8 +213,10 @@ impl Resolver {
     fn resolve_item(&mut self, item: &Item) -> CompilerResult<Type> {
         let ty = match &item.kind {
             ItemKind::Function(function) => {
-                let params= function.params
-                    .iter().map(|p| self.resolve_ty(&p.ty))
+                let params = function
+                    .params
+                    .iter()
+                    .map(|p| self.resolve_ty(&p.ty))
                     .collect::<CompilerResult<Vec<Type>>>()?;
 
                 let return_ty = match &function.return_ty {
@@ -224,10 +224,10 @@ impl Resolver {
                     None => Type::Void,
                 };
 
-                Type::Function {
+                Type::Function(Signature {
                     params: Rc::from(params),
                     return_ty: Rc::from(return_ty),
-                }
+                })
             }
             ItemKind::Record(record) => {
                 let mut fields = Vec::with_capacity(record.fields.len());
@@ -338,10 +338,11 @@ impl Resolver {
             }
 
             StmtKind::Return { expr } => {
-                let Some(Type::Function { return_ty, .. }) = self.context_function.clone() else {
+                let Some(Type::Function(signature)) = self.context_function.clone() else {
                     return Err(error!(stmt.node.span, "Return outside of a function"));
                 };
                 let expr_ty = self.check_expr(expr)?;
+                let return_ty = signature.return_ty;
                 if expr_ty != *return_ty {
                     return Err(error!(
                         stmt.node.span,
@@ -466,14 +467,14 @@ impl Resolver {
                         return Ok(Type::Void);
                     }
 
-                    let Type::Function { params, return_ty } = self.lookup_type(ident)? else {
+                    let Type::Function(signature) = self.lookup_type(ident)? else {
                         return Err(error!(
                             ident.node.span,
                             "'{}' is not a function", ident.symbol
                         )); // TODO: Test
                     };
 
-                    if args.len() != params.len() {
+                    if args.len() != signature.params.len() {
                         return Err(error!(
                             expr.node.span,
                             "Function called with incorrect number of arguments",
@@ -481,7 +482,7 @@ impl Resolver {
                     }
                     for (i, arg) in args.iter().enumerate() {
                         let arg_ty = self.check_expr(arg)?;
-                        let param_ty = &params[i];
+                        let param_ty = &signature.params[i];
                         if arg_ty != *param_ty {
                             return Err(error!(
                                 arg.node.span,
@@ -489,7 +490,7 @@ impl Resolver {
                             ));
                         }
                     }
-                    (*return_ty).clone()
+                    (*signature.return_ty).clone()
                 } else {
                     return Err(error!(
                         callee.node.span,

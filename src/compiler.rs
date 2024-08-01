@@ -8,10 +8,13 @@ use wasm_encoder::{
 };
 
 use crate::ast;
-use crate::ast::{BinOpKind, Expr, ExprKind, Identifier, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind, Symbol, UnOpKind};
+use crate::ast::{
+    BinOpKind, Expr, ExprKind, Identifier, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind,
+    Symbol, UnOpKind,
+};
 use crate::compiler::resolution::{Address, SymbolTable};
-use crate::compiler::resolver::{Resolver, Type};
-use crate::error::{CompilerResult, error};
+use crate::compiler::resolver::{Resolver, Signature, Type};
+use crate::error::{error, CompilerResult};
 use crate::lexer::Span;
 use crate::parser::parse;
 
@@ -52,7 +55,7 @@ impl Type {
             Type::Bool => 1,
             Type::Array { inner, size } => inner.size() * size,
             Type::Record { fields } => fields.iter().map(|f| f.ty.size()).sum(),
-            Type::Function { .. } => todo!()
+            Type::Function { .. } => todo!(),
         }
     }
 }
@@ -128,29 +131,42 @@ impl Compiler {
     const MEM: u32 = 0;
 
     // TODO: Make Type::Function a concrete type
-    fn lookup_function(&self, f: &ast::Function) -> CompilerResult<Type> {
-        self.node_types
+    fn lookup_function(&self, f: &ast::Function) -> CompilerResult<Signature> {
+        let Type::Function(signature) = self
+            .node_types
             .get(&f.name.node.id)
             .cloned()
-            .ok_or_else(|| error!(f.name.node.span, "Fatal: unresolved function"))
+            .ok_or_else(|| error!(f.name.node.span, "Fatal: unresolved function"))?
+        else {
+            return Err(error!(f.name.node.span, "Fatal: type is not a function"));
+        };
+        Ok(signature)
     }
 
     fn lookup_ty(&self, identifier: &Identifier) -> CompilerResult<Type> {
         self.node_types
             .get(&identifier.node.id)
             .cloned()
-            .ok_or_else(|| error!(identifier.node.span, "Fatal: unresolved '{}'", identifier.symbol))
+            .ok_or_else(|| {
+                error!(
+                    identifier.node.span,
+                    "Fatal: unresolved '{}'", identifier.symbol
+                )
+            })
     }
 
     fn function(&mut self, function: &ast::Function) -> CompilerResult<()> {
-        let Type::Function { params, return_ty } = self.lookup_function(&function)? else {
-            return Err(error!(function.name.node.span, "Fatal: invalid function"))
-        };
-        let params = params
+        let signature = self.lookup_function(&function)?;
+        let params = signature
+            .params
             .iter()
             .map(|p| p.as_wasm())
             .collect::<CompilerResult<Vec<ValType>>>()?;
-        let returns: &[ValType] = if *return_ty == Type::Void { &[] } else { &[return_ty.as_wasm()?] };
+        let returns: &[ValType] = if *signature.return_ty == Type::Void {
+            &[]
+        } else {
+            &[signature.return_ty.as_wasm()?]
+        };
         let type_index = self.types.len();
         self.types.function(params, returns.iter().copied());
         self.functions.function(type_index);
@@ -166,7 +182,7 @@ impl Compiler {
             .map(|t| (1, t));
 
         self.local_counter.0 = 0; // TODO :(
-        
+
         let mut wasm_function = wasm_encoder::Function::new(locals);
 
         self.statement(&mut wasm_function, &function.body)?;
@@ -214,16 +230,14 @@ impl Compiler {
                 let ty = self.lookup_ty(name)?;
                 let address = match ty {
                     Type::Void => Address::None,
-                    Type::Int | Type::Float | Type::Bool  => Address::Var(self.local_counter.next()),
-                    Type::Array { .. } |
-                    Type::Record { .. } |
-                    Type::Function { .. } => {
+                    Type::Int | Type::Float | Type::Bool => Address::Var(self.local_counter.next()),
+                    Type::Array { .. } | Type::Record { .. } | Type::Function { .. } => {
                         let pointer = self.stack_pointer;
                         self.stack_pointer += ty.size();
                         Address::Mem(pointer)
                     }
                 };
-                
+
                 if let Some(value) = value {
                     self.expression(func, value)?; // TODO: Define what to do when declared var is used in initializer
                     match address {
