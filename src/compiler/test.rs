@@ -467,7 +467,7 @@ fn test_nested_records_forward_declaration() {
 
             export fn main() {
                 let one One
-                one.a.b = 1
+                one.a.b = 25
                 print_int(one.a.b)
             }
         "#,

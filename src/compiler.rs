@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
@@ -9,16 +8,13 @@ use wasm_encoder::{
 
 use crate::ast;
 use crate::ast::{
-    BinOpKind, Expr, ExprKind, Identifier, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind,
-    Symbol, UnOpKind,
+    BinOpKind, Expr, ExprKind, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind, UnOpKind,
 };
-use crate::compiler::resolution::{Address, SymbolTable};
-use crate::compiler::resolver::{Resolver, Signature, Type};
+use crate::compiler::resolver::{Declaration, DeclarationId, DeclarationKind, Resolver, Type};
 use crate::error::{error, CompilerResult};
 use crate::lexer::Span;
 use crate::parser::parse;
 
-mod resolution;
 mod resolver;
 #[cfg(test)]
 mod test;
@@ -30,20 +26,12 @@ struct WasmStr {
     len: u32,
 }
 
-#[derive(Clone, Eq, PartialEq, Debug)]
-pub enum Ty {
-    Void,
-    Int,
-    Float,
-    Bool,
-    Array(Rc<Ty>, u32),
-    Record(Vec<Field>),
-}
-
-#[derive(Clone, Eq, PartialEq, Debug)]
-pub struct Field {
-    name: Symbol,
-    ty: Rc<Ty>,
+#[derive(Debug)]
+pub enum Address {
+    None,
+    Var(u32),
+    Mem(u32),
+    Fn(u32),
 }
 
 impl Type {
@@ -58,33 +46,7 @@ impl Type {
             Type::Function { .. } => todo!(),
         }
     }
-}
 
-impl Ty {
-    fn size(&self) -> u32 {
-        match self {
-            Ty::Void => 0,
-            Ty::Int => 4,
-            Ty::Float => 8,
-            Ty::Bool => 1,
-            Ty::Array(inner, length) => inner.size() * length,
-            Ty::Record(fields) => fields.iter().map(|f| f.ty.size()).sum(),
-        }
-    }
-
-    fn as_wasm(&self) -> CompilerResult<ValType> {
-        match self {
-            Ty::Int | Ty::Bool | Ty::Array(_, _) | Ty::Record(_) => Ok(ValType::I32), // TODO: specify
-            Ty::Float => Ok(ValType::F64),
-            _ => Err(error!(
-                Span(0, 0),
-                "{self:?} type does not have a wasm equivalent"
-            )),
-        }
-    }
-}
-
-impl Type {
     fn as_wasm(&self) -> CompilerResult<ValType> {
         match self {
             Type::Int | Type::Bool | Type::Array { .. } | Type::Record { .. } => Ok(ValType::I32), // TODO: specify
@@ -110,53 +72,73 @@ impl Counter {
 
 #[derive(Default)]
 struct Compiler {
-    strings: HashMap<NodeId, WasmStr>,
-    symbol_table: SymbolTable,
     node_types: HashMap<NodeId, Type>,
-    addresses: HashMap<NodeId, Address>,
-    stack_pointer: u32,
-    local_counter: Counter,
+    declarations: Vec<Declaration>,
+    uses: HashMap<NodeId, Declaration>,
 
-    types: TypeSection,
-    functions: FunctionSection,
-    memories: MemorySection,
-    codes: CodeSection,
-    data: DataSection,
+    addresses: HashMap<DeclarationId, Address>,
+    strings: HashMap<NodeId, WasmStr>,
+    stack_pointer: u32,
+
+    // TODO: Extract into an encoder struct
+    type_section: TypeSection,
+    function_section: FunctionSection,
+    memory_section: MemorySection,
+    code_section: CodeSection,
+    data_section: DataSection,
     data_offset: u32,
-    imports: ImportSection,
-    exports: ExportSection,
+    import_section: ImportSection,
+    export_section: ExportSection,
 }
 
 impl Compiler {
     const MEM: u32 = 0;
 
-    // TODO: Make Type::Function a concrete type
-    fn lookup_function(&self, f: &ast::Function) -> CompilerResult<Signature> {
-        let Type::Function(signature) = self
-            .node_types
-            .get(&f.name.node.id)
-            .cloned()
-            .ok_or_else(|| error!(f.name.node.span, "Fatal: unresolved function"))?
-        else {
-            return Err(error!(f.name.node.span, "Fatal: type is not a function"));
+    fn calculate_addresses(&mut self) {
+        let mut fn_index = 0;
+        let mut local_indices = HashMap::new();
+        for decl in &self.declarations {
+            let address = match decl.kind {
+                DeclarationKind::Local(fn_id) => match decl.ty {
+                    Type::Void => Address::None,
+                    Type::Int | Type::Float | Type::Bool => {
+                        let index = local_indices
+                            .entry(fn_id)
+                            .and_modify(|count| *count += 1)
+                            .or_insert(0);
+                        Address::Var(*index)
+                    }
+                    Type::Array { .. } | Type::Record { .. } | Type::Function { .. } => {
+                        let pointer = self.stack_pointer;
+                        self.stack_pointer += decl.ty.size();
+                        Address::Mem(pointer)
+                    }
+                },
+                DeclarationKind::Function => {
+                    let a = Address::Fn(fn_index);
+                    fn_index += 1;
+                    a
+                }
+                DeclarationKind::Type => continue,
+            };
+            self.addresses.insert(decl.id, address);
+        }
+    }
+
+    fn module(&mut self, module: &Module) -> CompilerResult<()> {
+        for item in &module.items {
+            if let ItemKind::Function(function) = &item.kind {
+                self.function(function)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn function(&mut self, f: &ast::Function) -> CompilerResult<()> {
+        let func_decl = self.uses.get(&f.name.node.id).unwrap();
+        let Type::Function(signature) = &func_decl.ty else {
+            unreachable!()
         };
-        Ok(signature)
-    }
-
-    fn lookup_ty(&self, identifier: &Identifier) -> CompilerResult<Type> {
-        self.node_types
-            .get(&identifier.node.id)
-            .cloned()
-            .ok_or_else(|| {
-                error!(
-                    identifier.node.span,
-                    "Fatal: unresolved '{}'", identifier.symbol
-                )
-            })
-    }
-
-    fn function(&mut self, function: &ast::Function) -> CompilerResult<()> {
-        let signature = self.lookup_function(&function)?;
         let params = signature
             .params
             .iter()
@@ -167,49 +149,37 @@ impl Compiler {
         } else {
             &[signature.return_ty.as_wasm()?]
         };
-        let type_index = self.types.len();
-        self.types.function(params, returns.iter().copied());
-        self.functions.function(type_index);
+        let type_index = self.type_section.len();
+        self.type_section.function(params, returns.iter().copied());
+        self.function_section.function(type_index);
 
-        let signature = self.symbol_table.lookup_function(&function.name)?;
-
-        let locals = signature
-            .locals
+        let locals = self
+            .declarations
             .iter()
-            .map(Ty::as_wasm)
-            .collect::<CompilerResult<Vec<_>>>()?
-            .into_iter()
-            .map(|t| (1, t));
-
-        self.local_counter.0 = 0; // TODO :(
-
-        let mut wasm_function = wasm_encoder::Function::new(locals);
-
-        self.statement(&mut wasm_function, &function.body)?;
-        wasm_function.instruction(&Instruction::End);
-        self.codes.function(&wasm_function);
+            .filter(|d| {
+                if let DeclarationKind::Local(f) = d.kind {
+                    f == func_decl.id
+                } else {
+                    false
+                }
+            })
+            .map(|d| d.ty.as_wasm().map(|w| (1, w)))
+            .collect::<CompilerResult<Vec<(u32, ValType)>>>()?;
 
         // Export
-        if function.exported {
-            self.exports.export(
-                function.name.symbol.as_str(),
-                ExportKind::Func,
-                signature.index,
-            );
+        if f.exported {
+            let Some(Address::Fn(index)) = self.addresses.get(&func_decl.id) else {
+                unreachable!()
+            };
+            self.export_section
+                .export(f.name.symbol.as_str(), ExportKind::Func, *index);
         }
-        Ok(())
-    }
 
-    fn module(&mut self, module: &Module) -> CompilerResult<()> {
-        for item in &module.items {
-            match &item.kind {
-                ItemKind::Function(function) => {
-                    self.function(function)?;
-                }
+        let mut wasm_func = wasm_encoder::Function::new(locals);
+        self.statement(&mut wasm_func, &f.body)?;
+        wasm_func.instruction(&Instruction::End);
+        self.code_section.function(&wasm_func);
 
-                ItemKind::Record(_) => {}
-            }
-        }
         Ok(())
     }
 
@@ -227,35 +197,26 @@ impl Compiler {
             }
 
             StmtKind::Declaration { name, value, .. } => {
-                let ty = self.lookup_ty(name)?;
-                let address = match ty {
-                    Type::Void => Address::None,
-                    Type::Int | Type::Float | Type::Bool => Address::Var(self.local_counter.next()),
-                    Type::Array { .. } | Type::Record { .. } | Type::Function { .. } => {
-                        let pointer = self.stack_pointer;
-                        self.stack_pointer += ty.size();
-                        Address::Mem(pointer)
-                    }
-                };
-
                 if let Some(value) = value {
                     self.expression(func, value)?; // TODO: Define what to do when declared var is used in initializer
+                    let Some(decl) = self.uses.get(&name.node.id) else {
+                        return Err(error!(name.node.span, "No mem found"));
+                    };
+                    let address = self.addresses.get(&decl.id).unwrap();
                     match address {
                         Address::Var(index) => {
-                            func.instruction(&Instruction::LocalSet(index));
+                            func.instruction(&Instruction::LocalSet(*index));
                         }
-                        Address::Mem(_) => {}
-                        Address::None => {}
+                        _ => todo!(),
                     }
                 }
-
-                self.addresses.insert(name.node.id, address);
             }
 
             StmtKind::Assignment { target, value } => match &target.kind {
                 ExprKind::Variable(name) => {
-                    let local = self.symbol_table.lookup_var(name)?;
-                    let Address::Var(index) = local.address else {
+                    let decl = self.uses.get(&name.node.id).unwrap();
+                    let address = self.addresses.get(&decl.id).unwrap();
+                    let Address::Var(index) = *address else {
                         return Err(error!(
                             name.node.span,
                             "Panic: invalid address for variable",
@@ -335,23 +296,25 @@ impl Compiler {
         &mut self,
         func: &mut wasm_encoder::Function,
         target: &Expr,
-    ) -> CompilerResult<Ty> {
+    ) -> CompilerResult<Type> {
         match &target.kind {
             ExprKind::Variable(name) => {
-                let local = self.symbol_table.lookup_var(name)?;
-                let Address::Mem(addr) = local.address else {
+                let decl = self.uses.get(&name.node.id).unwrap();
+                let address = self.addresses.get(&decl.id).unwrap();
+                let Address::Mem(addr) = *address else {
                     return Err(error!(
                         name.node.span,
                         "Panic: invalid address for variable"
                     ));
                 };
                 func.instruction(&Instruction::I32Const(addr as i32));
-                Ok(local.ty.clone())
+                let ty = &self.uses.get(&name.node.id).expect("local not found").ty;
+                Ok(ty.clone())
             }
             ExprKind::ArrayIndex { expr, index } => {
                 let ty = self.push_address(func, expr)?;
                 // TODO: Check bounds
-                let Ty::Array(inner, _size) = ty else {
+                let Type::Array { inner, .. } = ty else {
                     return Err(error!(
                         expr.node.span,
                         "Panic: trying to index something that is not an array",
@@ -366,7 +329,7 @@ impl Compiler {
 
             ExprKind::FieldAccess { expr, field } => {
                 let ty = self.push_address(func, expr)?;
-                let Ty::Record(fields) = ty.clone() else {
+                let Type::Record { fields } = ty.clone() else {
                     return Err(error!(
                         field.node.span,
                         "Panic: trying to get a field of something that is not a record",
@@ -374,7 +337,7 @@ impl Compiler {
                 };
                 let mut offset = 0;
                 let mut field_ty = None;
-                for f in &fields {
+                for f in fields.iter() {
                     if f.name == field.symbol {
                         field_ty = Some(f.ty.clone());
                         break;
@@ -416,7 +379,7 @@ impl Compiler {
                 };
                 self.data_offset += wasm_str.len;
                 self.strings.insert(expr.node.id, wasm_str);
-                self.data.active(
+                self.data_section.active(
                     wasm_str.memory,
                     &ConstExpr::i32_const(wasm_str.offset as i32),
                     symbol.as_str().bytes(),
@@ -540,32 +503,30 @@ impl Compiler {
             },
 
             ExprKind::Variable(ident) => {
-                let local_var = self.symbol_table.lookup_var(ident)?;
-                match local_var.address {
+                let local = self.uses.get(&ident.node.id).unwrap();
+                let address = self.addresses.get(&local.id).unwrap();
+                match address {
                     Address::Var(index) => {
-                        func.instruction(&Instruction::LocalGet(index));
+                        func.instruction(&Instruction::LocalGet(*index));
                     }
-                    Address::Mem(_) => {
-                        panic!("Should not happen")
-                    }
-                    Address::None => {}
+                    _ => todo!(),
                 }
             }
 
             ExprKind::ArrayIndex { .. } | ExprKind::FieldAccess { .. } => {
                 let inner = self.push_address(func, expr)?;
                 let load_instruction = match inner {
-                    Ty::Int => Instruction::I32Load(MemArg {
+                    Type::Int => Instruction::I32Load(MemArg {
                         offset: 0,
                         align: 2,
                         memory_index: 0,
                     }),
-                    Ty::Float => Instruction::F64Load(MemArg {
+                    Type::Float => Instruction::F64Load(MemArg {
                         offset: 0,
                         align: 3,
                         memory_index: 0,
                     }),
-                    Ty::Bool => Instruction::I32Load8S(MemArg {
+                    Type::Bool => Instruction::I32Load8S(MemArg {
                         offset: 0,
                         align: 0,
                         memory_index: 0,
@@ -585,9 +546,14 @@ impl Compiler {
                         ))
                     }
                 };
-
-                let signature = self.symbol_table.lookup_function(name)?;
                 let arg = &args[0];
+
+                let decl = self.uses.get(&name.node.id).unwrap();
+                let addr = self.addresses.get(&decl.id).unwrap();
+                let Address::Fn(index) = *addr else {
+                    unreachable!()
+                };
+
                 // TODO: Hack!
                 if name.symbol.as_str() == "print" {
                     return if let ExprKind::Literal(LiteralKind::String(_)) = &arg.kind {
@@ -597,7 +563,7 @@ impl Compiler {
                         };
                         func.instruction(&Instruction::I32Const(was_str.offset as i32));
                         func.instruction(&Instruction::I32Const(was_str.len as i32));
-                        func.instruction(&Instruction::Call(signature.index));
+                        func.instruction(&Instruction::Call(index)); // FIXME!
                         Ok(())
                     } else {
                         Err(error!(expr.node.span, "Incorrect arguments for 'print'!"))
@@ -608,40 +574,39 @@ impl Compiler {
                     self.expression(func, arg)?;
                 }
 
-                func.instruction(&Instruction::Call(signature.index));
+                func.instruction(&Instruction::Call(index)); // Fixme
             }
         }
         Ok(())
     }
 
     fn import_functions(&mut self) -> CompilerResult<()> {
-        self.import_function("js", "print", &[Ty::Int, Ty::Int], Ty::Void)?;
-        self.import_function("js", "print_int", &[Ty::Int], Ty::Void)?;
-        self.import_function("js", "print_float", &[Ty::Float], Ty::Void)
+        self.import_function("js", "print", &[Type::Int, Type::Int], Type::Void)?;
+        self.import_function("js", "print_int", &[Type::Int], Type::Void)?;
+        self.import_function("js", "print_float", &[Type::Float], Type::Void)
     }
 
     fn import_function(
         &mut self,
         module: &'static str,
         name: &'static str,
-        params: &[Ty],
-        return_ty: Ty,
+        params: &[Type],
+        return_ty: Type,
     ) -> CompilerResult<()> {
-        let type_idx = self.types.len();
+        let type_idx = self.type_section.len();
         let wasm_params = params
             .iter()
-            .map(Ty::as_wasm)
+            .map(Type::as_wasm)
             .collect::<CompilerResult<Vec<_>>>()?;
-        let returns: &[ValType] = if return_ty == Ty::Void {
+        let returns: &[ValType] = if return_ty == Type::Void {
             &[]
         } else {
             &[return_ty.as_wasm()?]
         };
-        self.types.function(wasm_params, returns.iter().copied());
-        self.imports
+        self.type_section
+            .function(wasm_params, returns.iter().copied());
+        self.import_section
             .import(module, name, EntityType::Function(type_idx));
-        self.symbol_table
-            .import_function(Symbol::from(name), params, return_ty)?;
         Ok(())
     }
 
@@ -653,29 +618,37 @@ impl Compiler {
             shared: false,
             page_size_log2: None,
         };
-        self.memories.memory(memory);
-        self.exports.export("memory", ExportKind::Memory, 0);
+        self.memory_section.memory(memory);
+        self.export_section.export("memory", ExportKind::Memory, 0);
     }
 
     fn encode_wasm(&mut self) -> CompilerResult<Vec<u8>> {
         let mut wasm_module = wasm_encoder::Module::new();
-        wasm_module.section(&self.types);
-        wasm_module.section(&self.imports);
-        wasm_module.section(&self.functions);
-        wasm_module.section(&self.memories);
-        wasm_module.section(&self.exports);
-        wasm_module.section(&self.codes);
-        wasm_module.section(&self.data);
+        wasm_module.section(&self.type_section);
+        wasm_module.section(&self.import_section);
+        wasm_module.section(&self.function_section);
+        wasm_module.section(&self.memory_section);
+        wasm_module.section(&self.export_section);
+        wasm_module.section(&self.code_section);
+        wasm_module.section(&self.data_section);
         Ok(wasm_module.finish())
     }
 
     fn compile(&mut self, module: &Module) -> CompilerResult<Vec<u8>> {
         let mut resolver = Resolver::default();
+
+        // TODO: Make nice!
+        resolver.import_function("print", &[Type::Int, Type::Int], Type::Void)?;
+        resolver.import_function("print_int", &[Type::Int], Type::Void)?;
+        resolver.import_function("print_float", &[Type::Float], Type::Void)?;
         resolver.resolve(module)?;
         self.node_types = resolver.node_types;
+        self.declarations = resolver.declarations;
+        self.uses = resolver.uses;
+
+        self.calculate_addresses();
         self.import_functions()?;
         self.export_memory();
-        self.symbol_table.resolve(module)?;
         self.module(module)?;
         self.encode_wasm()
     }
