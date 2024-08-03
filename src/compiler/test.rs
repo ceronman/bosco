@@ -592,7 +592,7 @@ fn test_duplicate_function() {
         
         fn foo() {}
         fn foo(x int) int {}
-         //^^^ Compiler Error: Function 'foo' was already defined
+         //^^^ Compiler Error: Function 'foo' was already declared
         "#,
     );
 }
@@ -605,7 +605,7 @@ fn test_duplicate_function_from_export() {
         }
         
         fn print_int(x int) int {}
-         //^^^^^^^^^ Compiler Error: Function 'print_int' was already defined
+         //^^^^^^^^^ Compiler Error: Function 'print_int' was already declared
         "#,
     );
 }
@@ -857,7 +857,7 @@ fn test_duplicated_record() {
         }
         
         record Foo {
-             //^^^ Compiler Error: Record 'Foo' was already defined
+             //^^^ Compiler Error: Record 'Foo' was already declared
             weight float
         }
         "#,

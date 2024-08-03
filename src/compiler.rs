@@ -638,9 +638,6 @@ impl Compiler {
         let mut resolver = Resolver::default();
 
         // TODO: Make nice!
-        resolver.import_function("print", &[Type::Int, Type::Int], Type::Void)?;
-        resolver.import_function("print_int", &[Type::Int], Type::Void)?;
-        resolver.import_function("print_float", &[Type::Float], Type::Void)?;
         resolver.resolve(module)?;
         self.node_types = resolver.node_types;
         self.declarations = resolver.declarations;

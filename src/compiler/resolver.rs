@@ -1,4 +1,4 @@
-use std::collections::hash_map::Entry;
+use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
@@ -8,7 +8,7 @@ use crate::ast::{
     Param, Stmt, StmtKind, Symbol, TypeParam, UnOpKind,
 };
 use crate::compiler::Counter;
-use crate::error::{error, CompilerError, CompilerResult};
+use crate::error::{CompilerError, CompilerResult, error};
 use crate::lexer::Span;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -35,10 +35,10 @@ pub struct Field {
 }
 
 #[derive(Debug)]
-enum ResolveState {
-    Ready(Item),
+enum ResolutionState {
+    Delayed(Item),
     InProgress,
-    Done(Declaration),
+    Resolved(Declaration)
 }
 
 pub type DeclarationId = u32;
@@ -47,7 +47,7 @@ pub type DeclarationId = u32;
 pub struct Declaration {
     pub id: DeclarationId,
     pub ty: Type,
-    pub kind: DeclarationKind, // TODO: Is this necessary?
+    pub kind: DeclarationKind,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -57,63 +57,79 @@ pub enum DeclarationKind {
     Type,
 }
 
+type Scope = HashMap<Symbol, Rc<RefCell<ResolutionState>>>;
+
 #[derive(Default)]
 pub struct Resolver {
     ids: Counter,
-    module_declarations: HashMap<Symbol, ResolveState>,
-    scopes: VecDeque<HashMap<Symbol, Declaration>>,
+    scopes: VecDeque<Scope>,
     pub node_types: HashMap<NodeId, Type>,
     pub declarations: Vec<Declaration>,
     pub uses: HashMap<NodeId, Declaration>,
 }
 
 impl Resolver {
-    fn declare_type(
-        &mut self,
-        name: Symbol,
-        state: ResolveState,
-        err: impl Fn() -> CompilerError,
-    ) -> CompilerResult<()> {
-        match self.module_declarations.entry(name) {
-            Entry::Occupied(_) => Err(err()),
-            Entry::Vacant(v) => {
-                if let ResolveState::Done(decl) = &state {
-                    self.declarations.push(decl.clone());
-                }
-                v.insert(state);
-                Ok(())
-            }
+    fn declare(&mut self, symbol: Symbol, state: ResolutionState, err: impl Fn() -> CompilerError) -> CompilerResult<()> {
+        // TODO: Think about panics
+        let scope = self
+            .scopes
+            .front_mut()
+            .expect("There should be at least one scope available");
+
+        if scope.contains_key(&symbol) {
+            return Err(err());
         }
+
+        if let ResolutionState::Resolved(decl) = &state {
+            self.declarations.push(decl.clone());
+        }
+        scope.insert(symbol, Rc::new(RefCell::new(state)));
+
+        Ok(())
     }
 
-    fn lookup_declaration(&mut self, ident: &Identifier) -> CompilerResult<Declaration> {
-        let Some(state) = self.module_declarations.get_mut(&ident.symbol) else {
-            return Err(error!(ident.node.span, "Unknown type '{}'", ident.symbol));
-        };
+    fn lookup(&mut self, ident: &Identifier) -> CompilerResult<Declaration> {
+        let state = self.scopes
+            .iter()
+            .find_map(|scope| scope.get(&ident.symbol))
+            .cloned()
+            .ok_or_else(|| error!(ident.node.span, "Undeclared variable '{}'", ident.symbol))?; // TODO: error message
 
-        let decl = match state {
-            ResolveState::Ready(item) => {
-                let item = item.clone();
-                *state = ResolveState::InProgress;
-                self.resolve_item(&item)?
+        let item = match &*state.borrow() {
+            ResolutionState::Delayed(item) => {
+                item.clone()
             }
-            ResolveState::InProgress => {
+            ResolutionState::InProgress => {
                 return Err(error!(
                     ident.node.span,
                     "Type '{}' contains cycles", ident.symbol
                 ))
             }
-            ResolveState::Done(decl) => {
-                self.uses.insert(ident.node.id, decl.clone());
-                return Ok(decl.clone());
-            }
+            ResolutionState::Resolved(d) => return Ok(d.clone())
         };
-
-        let state = self.module_declarations.get_mut(&ident.symbol).unwrap();
-        *state = ResolveState::Done(decl.clone());
-        self.uses.insert(ident.node.id, decl.clone());
+        state.replace(ResolutionState::InProgress);
+        let decl = self.resolve_item(&item)?;
+        state.replace(ResolutionState::Resolved(decl.clone()));
         self.declarations.push(decl.clone());
+        self.uses.insert(ident.node.id, decl.clone());
         Ok(decl)
+    }
+
+    fn declare_local(
+        &mut self,
+        ident: &Identifier,
+        ty: Type,
+        func_id: DeclarationId,
+        err: impl Fn() -> CompilerError,
+    ) -> CompilerResult<()> {
+        let decl = Declaration {
+            id: self.ids.next(),
+            ty,
+            kind: DeclarationKind::Local(func_id),
+        };
+        self.declare(ident.symbol.clone(), ResolutionState::Resolved(decl.clone()), err)?;
+        self.uses.insert(ident.node.id, decl);
+        Ok(())
     }
 
     fn declare_builtin(&mut self, name: &str, ty: Type) -> CompilerResult<()> {
@@ -122,7 +138,7 @@ impl Resolver {
             ty,
             kind: DeclarationKind::Type,
         };
-        self.declare_type(Symbol::from(name), ResolveState::Done(decl), || {
+        self.declare(Symbol::from(name), ResolutionState::Resolved(decl), || {
             error!(Span(0, 0), "Builtin '{name}' is already declared")
         })
     }
@@ -153,8 +169,8 @@ impl Resolver {
             kind: DeclarationKind::Function,
         };
 
-        self.declare_type(Symbol::from(name), ResolveState::Done(decl), || {
-            error!(Span(0, 0), "Builtin '{name}' is already declared")
+        self.declare(Symbol::from(name), ResolutionState::Resolved(decl), || {
+            error!(Span(0, 0), "Imported function '{name}' is already declared")
         })?;
 
         Ok(())
@@ -162,56 +178,49 @@ impl Resolver {
 
     fn collect_top_level_types(&mut self, module: &Module) -> CompilerResult<()> {
         for item in &module.items {
-            // TODO: Make name a shared field for item
-            let name = match &item.kind {
-                ItemKind::Function(f) => &f.name,
-                ItemKind::Record(r) => &r.name,
+            // TODO: Maybe record and function can share some data here.
+            match &item.kind {
+                ItemKind::Function(f) => {
+                    self.declare(
+                        f.name.symbol.clone(),
+                        ResolutionState::Delayed(item.clone()),
+                        || error!(f.name.node.span, "Function '{}' was already declared", f.name.symbol))?
+                }
+                ItemKind::Record(r) => {
+                    self.declare(
+                        r.name.symbol.clone(),
+                        ResolutionState::Delayed(item.clone()),
+                        || error!(r.name.node.span, "Record '{}' was already declared", r.name.symbol))?
+                }
             };
-            self.declare_type(
-                name.symbol.clone(),
-                ResolveState::Ready(item.clone()),
-                || {
-                    error!(
-                        name.node.span,
-                        "{} '{}' was already defined",
-                        match item.kind {
-                            ItemKind::Function(_) => "Function",
-                            ItemKind::Record(_) => "Record",
-                        },
-                        name.symbol
-                    )
-                },
-            )?;
-        }
 
-        for item in &module.items {
-            let name = match &item.kind {
-                ItemKind::Function(f) => &f.name,
-                ItemKind::Record(r) => &r.name,
-            };
-            let decl = self.lookup_declaration(name)?;
-            self.uses.insert(name.node.id, decl.clone());
-            self.node_types.insert(name.node.id, decl.ty);
         }
 
         Ok(())
     }
 
     pub fn resolve(&mut self, module: &Module) -> CompilerResult<()> {
+        self.begin_scope();
+        self.import_function("print", &[Type::Int, Type::Int], Type::Void)?;
+        self.import_function("print_int", &[Type::Int], Type::Void)?;
+        self.import_function("print_float", &[Type::Float], Type::Void)?;
         self.declare_builtins()?;
         self.collect_top_level_types(module)?;
 
         for item in &module.items {
             if let ItemKind::Function(f) = &item.kind {
-                let decl = self.lookup_declaration(&f.name)?;
+                let decl = self.lookup(&f.name)?;
+                self.uses.insert(f.name.node.id, decl.clone());
                 self.check_function(&decl, f)?;
             }
         }
+        self.end_scope();
+        debug_assert!(self.scopes.len() == 0);
         Ok(())
     }
 
     fn resolve_item(&mut self, item: &Item) -> CompilerResult<Declaration> {
-        let ty = match &item.kind {
+        let decl = match &item.kind {
             ItemKind::Function(function) => {
                 let params = function
                     .params
@@ -251,7 +260,7 @@ impl Resolver {
                 }
             }
         };
-        Ok(ty)
+        Ok(decl)
     }
 
     fn resolve_ty(&mut self, ast_ty: &ast::Type) -> CompilerResult<Type> {
@@ -277,7 +286,7 @@ impl Resolver {
             });
         }
 
-        let decl = self.lookup_declaration(&ast_ty.name)?;
+        let decl = self.lookup(&ast_ty.name)?;
         self.node_types.insert(ast_ty.name.node.id, decl.ty.clone());
         Ok(decl.ty)
     }
@@ -289,8 +298,8 @@ impl Resolver {
     ) -> CompilerResult<()> {
         self.begin_scope();
         for Param { name, ty } in &function.params {
-            let param_ty = self.lookup_declaration(&ty.name)?.ty;
-            self.declare_local(&name, param_ty, func_decl, || {
+            let param_ty = self.lookup(&ty.name)?.ty;
+            self.declare_local(&name, param_ty, func_decl.id, || {
                 error!(
                     name.node.span,
                     "Parameter '{}' is already declared", name.symbol
@@ -299,7 +308,7 @@ impl Resolver {
         }
         self.check_stmt(func_decl, &function.body)?;
         self.end_scope();
-        debug_assert!(self.scopes.len() == 0);
+        debug_assert!(self.scopes.len() == 1);
         Ok(())
     }
 
@@ -319,7 +328,7 @@ impl Resolver {
 
             StmtKind::Declaration { name, ty, value } => {
                 let var_ty = self.resolve_ty(&ty)?;
-                self.declare_local(&name, var_ty.clone(), func_decl, || {
+                self.declare_local(&name, var_ty.clone(), func_decl.id, || {
                     error!(
                         name.node.span,
                         "Variable '{}' is already declared in this scope", name.symbol
@@ -401,7 +410,7 @@ impl Resolver {
             ExprKind::Literal(LiteralKind::String { .. }) => Type::Int, // TODO: Add String type
             ExprKind::Literal(LiteralKind::Bool(_)) => Type::Bool,
             ExprKind::Variable(ident) => {
-                let decl = self.resolve_local(ident)?;
+                let decl = self.lookup(ident)?;
                 self.uses.insert(ident.node.id, decl.clone());
                 decl.ty
             }
@@ -499,7 +508,8 @@ impl Resolver {
 
             ExprKind::Call { callee, args } => {
                 if let ExprKind::Variable(ident) = &callee.kind {
-                    let decl = self.lookup_declaration(ident)?;
+                    let decl = self.lookup(ident)?;
+                    self.uses.insert(ident.node.id, decl.clone()); // FIXME! This should not be here.
 
                     // TODO: hack!
                     if ident.symbol.as_str() == "print" {
@@ -546,44 +556,6 @@ impl Resolver {
         };
         self.node_types.insert(expr.node.id, ty.clone());
         Ok(ty)
-    }
-
-    fn declare_local(
-        &mut self,
-        identifier: &Identifier,
-        ty: Type,
-        func_decl: &Declaration,
-        err: impl Fn() -> CompilerError,
-    ) -> CompilerResult<()> {
-        // TODO: Think about panics
-        let scope = self
-            .scopes
-            .front_mut()
-            .expect("There should be at least one scope available");
-
-        if scope.contains_key(&identifier.symbol) {
-            return Err(err());
-        }
-
-        let decl = Declaration {
-            id: self.ids.next(),
-            ty,
-            kind: DeclarationKind::Local(func_decl.id),
-        };
-
-        scope.insert(identifier.symbol.clone(), decl.clone());
-        self.declarations.push(decl.clone());
-        self.uses.insert(identifier.node.id, decl);
-
-        Ok(())
-    }
-
-    fn resolve_local(&mut self, ident: &Identifier) -> CompilerResult<Declaration> {
-        self.scopes
-            .iter()
-            .find_map(|scope| scope.get(&ident.symbol))
-            .cloned()
-            .ok_or_else(|| error!(ident.node.span, "Undeclared variable '{}'", ident.symbol))
     }
 
     fn begin_scope(&mut self) {
