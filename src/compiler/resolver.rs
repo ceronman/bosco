@@ -36,9 +36,9 @@ pub struct Field {
 
 #[derive(Debug)]
 enum ResolveState {
-    Unresolved(Item),
+    Ready(Item),
     InProgress,
-    Resolved(Declaration),
+    Done(Declaration),
 }
 
 pub type DeclarationId = u32;
@@ -77,7 +77,7 @@ impl Resolver {
         match self.module_declarations.entry(name) {
             Entry::Occupied(_) => Err(err()),
             Entry::Vacant(v) => {
-                if let ResolveState::Resolved(decl) = &state {
+                if let ResolveState::Done(decl) = &state {
                     self.declarations.push(decl.clone());
                 }
                 v.insert(state);
@@ -92,7 +92,7 @@ impl Resolver {
         };
 
         let decl = match state {
-            ResolveState::Unresolved(item) => {
+            ResolveState::Ready(item) => {
                 let item = item.clone();
                 *state = ResolveState::InProgress;
                 self.resolve_item(&item)?
@@ -103,14 +103,14 @@ impl Resolver {
                     "Type '{}' contains cycles", ident.symbol
                 ))
             }
-            ResolveState::Resolved(decl) => {
+            ResolveState::Done(decl) => {
                 self.uses.insert(ident.node.id, decl.clone());
                 return Ok(decl.clone());
             }
         };
 
         let state = self.module_declarations.get_mut(&ident.symbol).unwrap();
-        *state = ResolveState::Resolved(decl.clone());
+        *state = ResolveState::Done(decl.clone());
         self.uses.insert(ident.node.id, decl.clone());
         self.declarations.push(decl.clone());
         Ok(decl)
@@ -122,7 +122,7 @@ impl Resolver {
             ty,
             kind: DeclarationKind::Type,
         };
-        self.declare_type(Symbol::from(name), ResolveState::Resolved(decl), || {
+        self.declare_type(Symbol::from(name), ResolveState::Done(decl), || {
             error!(Span(0, 0), "Builtin '{name}' is already declared")
         })
     }
@@ -153,7 +153,7 @@ impl Resolver {
             kind: DeclarationKind::Function,
         };
 
-        self.declare_type(Symbol::from(name), ResolveState::Resolved(decl), || {
+        self.declare_type(Symbol::from(name), ResolveState::Done(decl), || {
             error!(Span(0, 0), "Builtin '{name}' is already declared")
         })?;
 
@@ -169,7 +169,7 @@ impl Resolver {
             };
             self.declare_type(
                 name.symbol.clone(),
-                ResolveState::Unresolved(item.clone()),
+                ResolveState::Ready(item.clone()),
                 || {
                     error!(
                         name.node.span,
