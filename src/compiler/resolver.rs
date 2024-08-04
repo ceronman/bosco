@@ -8,37 +8,15 @@ use crate::ast::{
     Param, Stmt, StmtKind, Symbol, TypeParam, UnOpKind,
 };
 use crate::compiler::Counter;
-use crate::error::{CompilerError, CompilerResult, error};
+use crate::error::{error, CompilerError, CompilerResult};
 use crate::lexer::Span;
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum Type {
-    Void,
-    Int,
-    Float,
-    Bool,
-    Array { inner: Rc<Type>, size: u32 },
-    Record { fields: Rc<[Field]> },
-    Function(Signature),
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Signature {
-    pub params: Rc<[Type]>,
-    pub return_ty: Rc<Type>,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub struct Field {
-    pub name: Symbol,
-    pub ty: Rc<Type>,
-}
+use crate::types::{Field, Signature, Type};
 
 #[derive(Debug)]
 enum ResolutionState {
     Delayed(Item),
     InProgress,
-    Resolved(Declaration)
+    Resolved(Declaration),
 }
 
 pub type DeclarationId = u32;
@@ -60,16 +38,26 @@ pub enum DeclarationKind {
 type Scope = HashMap<Symbol, Rc<RefCell<ResolutionState>>>;
 
 #[derive(Default)]
-pub struct Resolver {
-    ids: Counter,
-    scopes: VecDeque<Scope>,
+pub struct Resolution {
     pub node_types: HashMap<NodeId, Type>,
     pub declarations: Vec<Declaration>,
     pub uses: HashMap<NodeId, Declaration>,
 }
 
+#[derive(Default)]
+struct Resolver {
+    ids: Counter,
+    scopes: VecDeque<Scope>,
+    res: Resolution,
+}
+
 impl Resolver {
-    fn declare(&mut self, symbol: Symbol, state: ResolutionState, err: impl Fn() -> CompilerError) -> CompilerResult<()> {
+    fn declare(
+        &mut self,
+        symbol: Symbol,
+        state: ResolutionState,
+        err: impl Fn() -> CompilerError,
+    ) -> CompilerResult<()> {
         // TODO: Think about panics
         let scope = self
             .scopes
@@ -81,7 +69,7 @@ impl Resolver {
         }
 
         if let ResolutionState::Resolved(decl) = &state {
-            self.declarations.push(decl.clone());
+            self.res.declarations.push(decl.clone());
         }
         scope.insert(symbol, Rc::new(RefCell::new(state)));
 
@@ -89,29 +77,27 @@ impl Resolver {
     }
 
     fn lookup(&mut self, ident: &Identifier) -> CompilerResult<Declaration> {
-        let state = self.scopes
+        let state = self
+            .scopes
             .iter()
             .find_map(|scope| scope.get(&ident.symbol))
             .cloned()
             .ok_or_else(|| error!(ident.node.span, "Undeclared variable '{}'", ident.symbol))?; // TODO: error message
 
         let item = match &*state.borrow() {
-            ResolutionState::Delayed(item) => {
-                item.clone()
-            }
+            ResolutionState::Delayed(item) => item.clone(),
             ResolutionState::InProgress => {
                 return Err(error!(
                     ident.node.span,
                     "Type '{}' contains cycles", ident.symbol
                 ))
             }
-            ResolutionState::Resolved(d) => return Ok(d.clone())
+            ResolutionState::Resolved(d) => return Ok(d.clone()),
         };
         state.replace(ResolutionState::InProgress);
         let decl = self.resolve_item(&item)?;
         state.replace(ResolutionState::Resolved(decl.clone()));
-        self.declarations.push(decl.clone());
-        self.uses.insert(ident.node.id, decl.clone());
+        self.res.declarations.push(decl.clone());
         Ok(decl)
     }
 
@@ -127,8 +113,12 @@ impl Resolver {
             ty,
             kind: DeclarationKind::Local(func_id),
         };
-        self.declare(ident.symbol.clone(), ResolutionState::Resolved(decl.clone()), err)?;
-        self.uses.insert(ident.node.id, decl);
+        self.declare(
+            ident.symbol.clone(),
+            ResolutionState::Resolved(decl.clone()),
+            err,
+        )?;
+        self.res.uses.insert(ident.node.id, decl);
         Ok(())
     }
 
@@ -151,7 +141,7 @@ impl Resolver {
         Ok(())
     }
 
-    pub fn import_function(
+    fn import_function(
         &mut self,
         name: &str,
         params: &[Type],
@@ -180,26 +170,33 @@ impl Resolver {
         for item in &module.items {
             // TODO: Maybe record and function can share some data here.
             match &item.kind {
-                ItemKind::Function(f) => {
-                    self.declare(
-                        f.name.symbol.clone(),
-                        ResolutionState::Delayed(item.clone()),
-                        || error!(f.name.node.span, "Function '{}' was already declared", f.name.symbol))?
-                }
-                ItemKind::Record(r) => {
-                    self.declare(
-                        r.name.symbol.clone(),
-                        ResolutionState::Delayed(item.clone()),
-                        || error!(r.name.node.span, "Record '{}' was already declared", r.name.symbol))?
-                }
+                ItemKind::Function(f) => self.declare(
+                    f.name.symbol.clone(),
+                    ResolutionState::Delayed(item.clone()),
+                    || {
+                        error!(
+                            f.name.node.span,
+                            "Function '{}' was already declared", f.name.symbol
+                        )
+                    },
+                )?,
+                ItemKind::Record(r) => self.declare(
+                    r.name.symbol.clone(),
+                    ResolutionState::Delayed(item.clone()),
+                    || {
+                        error!(
+                            r.name.node.span,
+                            "Record '{}' was already declared", r.name.symbol
+                        )
+                    },
+                )?,
             };
-
         }
 
         Ok(())
     }
 
-    pub fn resolve(&mut self, module: &Module) -> CompilerResult<()> {
+    fn resolve(&mut self, module: &Module) -> CompilerResult<()> {
         self.begin_scope();
         self.import_function("print", &[Type::Int, Type::Int], Type::Void)?;
         self.import_function("print_int", &[Type::Int], Type::Void)?;
@@ -208,10 +205,17 @@ impl Resolver {
         self.collect_top_level_types(module)?;
 
         for item in &module.items {
-            if let ItemKind::Function(f) = &item.kind {
-                let decl = self.lookup(&f.name)?;
-                self.uses.insert(f.name.node.id, decl.clone());
-                self.check_function(&decl, f)?;
+            match &item.kind {
+                ItemKind::Function(f) => {
+                    let decl = self.lookup(&f.name)?;
+                    self.res.uses.insert(f.name.node.id, decl.clone());
+                    self.check_function(&decl, f)?;
+                }
+
+                ItemKind::Record(r) => {
+                    let decl = self.lookup(&r.name)?;
+                    self.res.uses.insert(r.name.node.id, decl);
+                }
             }
         }
         self.end_scope();
@@ -287,7 +291,9 @@ impl Resolver {
         }
 
         let decl = self.lookup(&ast_ty.name)?;
-        self.node_types.insert(ast_ty.name.node.id, decl.ty.clone());
+        self.res
+            .node_types
+            .insert(ast_ty.name.node.id, decl.ty.clone());
         Ok(decl.ty)
     }
 
@@ -298,7 +304,7 @@ impl Resolver {
     ) -> CompilerResult<()> {
         self.begin_scope();
         for Param { name, ty } in &function.params {
-            let param_ty = self.lookup(&ty.name)?.ty;
+            let param_ty = self.resolve_ty(ty)?;
             self.declare_local(&name, param_ty, func_decl.id, || {
                 error!(
                     name.node.span,
@@ -411,7 +417,7 @@ impl Resolver {
             ExprKind::Literal(LiteralKind::Bool(_)) => Type::Bool,
             ExprKind::Variable(ident) => {
                 let decl = self.lookup(ident)?;
-                self.uses.insert(ident.node.id, decl.clone());
+                self.res.uses.insert(ident.node.id, decl.clone());
                 decl.ty
             }
             ExprKind::ArrayIndex { expr, index } => {
@@ -509,7 +515,7 @@ impl Resolver {
             ExprKind::Call { callee, args } => {
                 if let ExprKind::Variable(ident) = &callee.kind {
                     let decl = self.lookup(ident)?;
-                    self.uses.insert(ident.node.id, decl.clone()); // FIXME! This should not be here.
+                    self.res.uses.insert(ident.node.id, decl.clone());
 
                     // TODO: hack!
                     if ident.symbol.as_str() == "print" {
@@ -554,7 +560,7 @@ impl Resolver {
                 }
             }
         };
-        self.node_types.insert(expr.node.id, ty.clone());
+        self.res.node_types.insert(expr.node.id, ty.clone());
         Ok(ty)
     }
 
@@ -565,4 +571,10 @@ impl Resolver {
     fn end_scope(&mut self) {
         self.scopes.pop_front();
     }
+}
+
+pub fn resolve(module: &Module) -> CompilerResult<Resolution> {
+    let mut r = Resolver::default();
+    r.resolve(module)?;
+    Ok(r.res)
 }

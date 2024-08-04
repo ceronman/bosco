@@ -5,6 +5,7 @@ mod compiler;
 mod error;
 mod lexer;
 mod parser;
+mod types;
 
 fn main() {
     let code = r#"

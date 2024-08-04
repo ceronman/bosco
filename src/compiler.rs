@@ -10,10 +10,11 @@ use crate::ast;
 use crate::ast::{
     BinOpKind, Expr, ExprKind, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind, UnOpKind,
 };
-use crate::compiler::resolver::{Declaration, DeclarationId, DeclarationKind, Resolver, Type};
+use crate::compiler::resolver::{resolve, DeclarationId, DeclarationKind, Resolution};
 use crate::error::{error, CompilerResult};
 use crate::lexer::Span;
 use crate::parser::parse;
+use crate::types::Type;
 
 mod resolver;
 #[cfg(test)]
@@ -72,9 +73,7 @@ impl Counter {
 
 #[derive(Default)]
 struct Compiler {
-    node_types: HashMap<NodeId, Type>,
-    declarations: Vec<Declaration>,
-    uses: HashMap<NodeId, Declaration>,
+    res: Resolution,
 
     addresses: HashMap<DeclarationId, Address>,
     strings: HashMap<NodeId, WasmStr>,
@@ -97,7 +96,7 @@ impl Compiler {
     fn calculate_addresses(&mut self) {
         let mut fn_index = 0;
         let mut local_indices = HashMap::new();
-        for decl in &self.declarations {
+        for decl in &self.res.declarations {
             let address = match decl.kind {
                 DeclarationKind::Local(fn_id) => match decl.ty {
                     Type::Void => Address::None,
@@ -135,7 +134,7 @@ impl Compiler {
     }
 
     fn function(&mut self, f: &ast::Function) -> CompilerResult<()> {
-        let func_decl = self.uses.get(&f.name.node.id).unwrap();
+        let func_decl = self.res.uses.get(&f.name.node.id).unwrap();
         let Type::Function(signature) = &func_decl.ty else {
             unreachable!()
         };
@@ -154,6 +153,7 @@ impl Compiler {
         self.function_section.function(type_index);
 
         let locals = self
+            .res
             .declarations
             .iter()
             .filter(|d| {
@@ -199,7 +199,7 @@ impl Compiler {
             StmtKind::Declaration { name, value, .. } => {
                 if let Some(value) = value {
                     self.expression(func, value)?; // TODO: Define what to do when declared var is used in initializer
-                    let Some(decl) = self.uses.get(&name.node.id) else {
+                    let Some(decl) = self.res.uses.get(&name.node.id) else {
                         return Err(error!(name.node.span, "No mem found"));
                     };
                     let address = self.addresses.get(&decl.id).unwrap();
@@ -214,7 +214,7 @@ impl Compiler {
 
             StmtKind::Assignment { target, value } => match &target.kind {
                 ExprKind::Variable(name) => {
-                    let decl = self.uses.get(&name.node.id).unwrap();
+                    let decl = self.res.uses.get(&name.node.id).unwrap();
                     let address = self.addresses.get(&decl.id).unwrap();
                     let Address::Var(index) = *address else {
                         return Err(error!(
@@ -229,7 +229,7 @@ impl Compiler {
                     self.push_address(func, target)?;
                     self.expression(func, value)?;
 
-                    let instruction = match self.node_types.get(&value.node.id) {
+                    let instruction = match self.res.node_types.get(&value.node.id) {
                         // TODO: support this via polymorphism
                         Some(Type::Int) => Instruction::I32Store(MemArg {
                             offset: 0,
@@ -299,7 +299,7 @@ impl Compiler {
     ) -> CompilerResult<Type> {
         match &target.kind {
             ExprKind::Variable(name) => {
-                let decl = self.uses.get(&name.node.id).unwrap();
+                let decl = self.res.uses.get(&name.node.id).unwrap();
                 let address = self.addresses.get(&decl.id).unwrap();
                 let Address::Mem(addr) = *address else {
                     return Err(error!(
@@ -308,7 +308,12 @@ impl Compiler {
                     ));
                 };
                 func.instruction(&Instruction::I32Const(addr as i32));
-                let ty = &self.uses.get(&name.node.id).expect("local not found").ty;
+                let ty = &self
+                    .res
+                    .uses
+                    .get(&name.node.id)
+                    .expect("local not found")
+                    .ty;
                 Ok(ty.clone())
             }
             ExprKind::ArrayIndex { expr, index } => {
@@ -415,7 +420,7 @@ impl Compiler {
                 self.expression(func, left)?;
                 self.expression(func, right)?;
 
-                let Some(ty) = self.node_types.get(&left.node.id) else {
+                let Some(ty) = self.res.node_types.get(&left.node.id) else {
                     return Err(error!(
                         left.node.span,
                         "Fatal: Not type found for expression"
@@ -474,7 +479,7 @@ impl Compiler {
                     func.instruction(&Instruction::End);
                 }
                 UnOpKind::Neg => {
-                    let Some(ty) = self.node_types.get(&right.node.id) else {
+                    let Some(ty) = self.res.node_types.get(&right.node.id) else {
                         return Err(error!(
                             right.node.span,
                             "Fatal: Not type found for expression",
@@ -503,7 +508,7 @@ impl Compiler {
             },
 
             ExprKind::Variable(ident) => {
-                let local = self.uses.get(&ident.node.id).unwrap();
+                let local = self.res.uses.get(&ident.node.id).unwrap();
                 let address = self.addresses.get(&local.id).unwrap();
                 match address {
                     Address::Var(index) => {
@@ -548,7 +553,7 @@ impl Compiler {
                 };
                 let arg = &args[0];
 
-                let decl = self.uses.get(&name.node.id).unwrap();
+                let decl = self.res.uses.get(&name.node.id).unwrap();
                 let addr = self.addresses.get(&decl.id).unwrap();
                 let Address::Fn(index) = *addr else {
                     unreachable!()
@@ -635,14 +640,6 @@ impl Compiler {
     }
 
     fn compile(&mut self, module: &Module) -> CompilerResult<Vec<u8>> {
-        let mut resolver = Resolver::default();
-
-        // TODO: Make nice!
-        resolver.resolve(module)?;
-        self.node_types = resolver.node_types;
-        self.declarations = resolver.declarations;
-        self.uses = resolver.uses;
-
         self.calculate_addresses();
         self.import_functions()?;
         self.export_memory();
@@ -653,6 +650,20 @@ impl Compiler {
 
 pub fn compile(source: &str) -> CompilerResult<Vec<u8>> {
     let module = parse(source)?;
-    let mut compiler = Compiler::default();
+    let resolution = resolve(&module)?;
+    let mut compiler = Compiler {
+        res: resolution,
+        addresses: Default::default(),
+        strings: Default::default(),
+        stack_pointer: 0,
+        type_section: Default::default(),
+        function_section: Default::default(),
+        memory_section: Default::default(),
+        code_section: Default::default(),
+        data_section: Default::default(),
+        data_offset: 0,
+        import_section: Default::default(),
+        export_section: Default::default(),
+    };
     compiler.compile(&module)
 }
