@@ -82,7 +82,7 @@ impl Resolver {
             .iter()
             .find_map(|scope| scope.get(&ident.symbol))
             .cloned()
-            .ok_or_else(|| error!(ident.node.span, "Undeclared variable '{}'", ident.symbol))?; // TODO: error message
+            .ok_or_else(|| error!(ident.node.span, "Undeclared '{}'", ident.symbol))?;
 
         let item = match &*state.borrow() {
             ResolutionState::Delayed(item) => item.clone(),

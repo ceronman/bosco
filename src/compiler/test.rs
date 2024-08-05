@@ -543,7 +543,7 @@ fn test_undeclared_var() {
         r#"
         export fn main() {
             x = 1
-          //^ Compiler Error: Undeclared variable 'x'
+          //^ Compiler Error: Undeclared 'x'
         }"#,
     );
 }
