@@ -61,17 +61,6 @@ impl Type {
 }
 
 #[derive(Default)]
-struct Counter(u32);
-
-impl Counter {
-    fn next(&mut self) -> u32 {
-        let current = self.0;
-        self.0 += 1;
-        current
-    }
-}
-
-#[derive(Default)]
 struct Compiler {
     res: Resolution,
 
@@ -134,7 +123,8 @@ impl Compiler {
     }
 
     fn function(&mut self, f: &ast::Function) -> CompilerResult<()> {
-        let func_decl = self.res.uses.get(&f.name.node.id).unwrap();
+        let func_id = *self.res.uses.get(&f.name.node.id).unwrap();
+        let func_decl = &self.res.declarations[func_id as usize];
         let Type::Function(signature) = &func_decl.ty else {
             unreachable!()
         };
@@ -202,7 +192,7 @@ impl Compiler {
                     let Some(decl) = self.res.uses.get(&name.node.id) else {
                         return Err(error!(name.node.span, "No mem found"));
                     };
-                    let address = self.addresses.get(&decl.id).unwrap();
+                    let address = self.addresses.get(decl).unwrap();
                     match address {
                         Address::Var(index) => {
                             func.instruction(&Instruction::LocalSet(*index));
@@ -215,7 +205,7 @@ impl Compiler {
             StmtKind::Assignment { target, value } => match &target.kind {
                 ExprKind::Variable(name) => {
                     let decl = self.res.uses.get(&name.node.id).unwrap();
-                    let address = self.addresses.get(&decl.id).unwrap();
+                    let address = self.addresses.get(decl).unwrap();
                     let Address::Var(index) = *address else {
                         return Err(error!(
                             name.node.span,
@@ -300,7 +290,7 @@ impl Compiler {
         match &target.kind {
             ExprKind::Variable(name) => {
                 let decl = self.res.uses.get(&name.node.id).unwrap();
-                let address = self.addresses.get(&decl.id).unwrap();
+                let address = self.addresses.get(&decl).unwrap();
                 let Address::Mem(addr) = *address else {
                     return Err(error!(
                         name.node.span,
@@ -308,13 +298,9 @@ impl Compiler {
                     ));
                 };
                 func.instruction(&Instruction::I32Const(addr as i32));
-                let ty = &self
-                    .res
-                    .uses
-                    .get(&name.node.id)
-                    .expect("local not found")
-                    .ty;
-                Ok(ty.clone())
+                let decl_id = *self.res.uses.get(&name.node.id).expect("local not found");
+                let ty = self.res.declarations[decl_id as usize].ty.clone();
+                Ok(ty)
             }
             ExprKind::ArrayIndex { expr, index } => {
                 let ty = self.push_address(func, expr)?;
@@ -509,7 +495,7 @@ impl Compiler {
 
             ExprKind::Variable(ident) => {
                 let local = self.res.uses.get(&ident.node.id).unwrap();
-                let address = self.addresses.get(&local.id).unwrap();
+                let address = self.addresses.get(&local).unwrap();
                 match address {
                     Address::Var(index) => {
                         func.instruction(&Instruction::LocalGet(*index));
@@ -554,7 +540,7 @@ impl Compiler {
                 let arg = &args[0];
 
                 let decl = self.res.uses.get(&name.node.id).unwrap();
-                let addr = self.addresses.get(&decl.id).unwrap();
+                let addr = self.addresses.get(&decl).unwrap();
                 let Address::Fn(index) = *addr else {
                     unreachable!()
                 };

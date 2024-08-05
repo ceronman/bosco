@@ -7,7 +7,6 @@ use crate::ast::{
     BinOpKind, Expr, ExprKind, Function, Identifier, Item, ItemKind, LiteralKind, Module, NodeId,
     Param, Stmt, StmtKind, Symbol, TypeParam, UnOpKind,
 };
-use crate::compiler::Counter;
 use crate::error::{error, CompilerResult};
 use crate::types::{Field, Signature, Type};
 
@@ -15,7 +14,7 @@ use crate::types::{Field, Signature, Type};
 enum ResolutionState {
     Delayed(Item),
     InProgress,
-    Resolved(Declaration),
+    Resolved(DeclarationId),
 }
 
 pub type DeclarationId = u32;
@@ -40,17 +39,23 @@ type Scope = HashMap<Symbol, Rc<RefCell<ResolutionState>>>;
 pub struct Resolution {
     pub node_types: HashMap<NodeId, Type>,
     pub declarations: Vec<Declaration>,
-    pub uses: HashMap<NodeId, Declaration>,
+    pub uses: HashMap<NodeId, DeclarationId>,
 }
 
 #[derive(Default)]
 struct Resolver {
-    ids: Counter,
     scopes: VecDeque<Scope>,
     res: Resolution,
 }
 
 impl Resolver {
+    fn new_decl(&mut self, ty: Type, kind: DeclarationKind) -> DeclarationId {
+        let id = self.res.declarations.len() as u32;
+        let decl = Declaration { id, ty, kind };
+        self.res.declarations.push(decl);
+        id
+    }
+
     fn declare(&mut self, ident: &Identifier, state: ResolutionState) -> CompilerResult<()> {
         let Some(scope) = self.scopes.front_mut() else {
             // TODO: Make fatal or internal error
@@ -69,16 +74,12 @@ impl Resolver {
             ));
         }
 
-        if let ResolutionState::Resolved(decl) = &state {
-            self.res.declarations.push(decl.clone());
-        }
-
         scope.insert(name, Rc::new(RefCell::new(state)));
 
         Ok(())
     }
 
-    fn lookup(&mut self, ident: &Identifier) -> CompilerResult<Declaration> {
+    fn lookup(&mut self, ident: &Identifier) -> CompilerResult<DeclarationId> {
         let state = self
             .scopes
             .iter()
@@ -94,12 +95,11 @@ impl Resolver {
                     "Type '{}' contains cycles", ident.symbol
                 ))
             }
-            ResolutionState::Resolved(d) => return Ok(d.clone()),
+            ResolutionState::Resolved(d) => return Ok(*d),
         };
         state.replace(ResolutionState::InProgress);
         let decl = self.resolve_item(&item)?;
-        state.replace(ResolutionState::Resolved(decl.clone()));
-        self.res.declarations.push(decl.clone());
+        state.replace(ResolutionState::Resolved(decl));
         Ok(decl)
     }
 
@@ -109,22 +109,14 @@ impl Resolver {
         ty: Type,
         func_id: DeclarationId,
     ) -> CompilerResult<()> {
-        let decl = Declaration {
-            id: self.ids.next(),
-            ty,
-            kind: DeclarationKind::Local(func_id),
-        };
+        let decl = self.new_decl(ty, DeclarationKind::Local(func_id));
         self.declare(ident, ResolutionState::Resolved(decl.clone()))?;
         self.res.uses.insert(ident.node.id, decl);
         Ok(())
     }
 
     fn declare_builtin(&mut self, name: &str, ty: Type) -> CompilerResult<()> {
-        let decl = Declaration {
-            id: self.ids.next(),
-            ty,
-            kind: DeclarationKind::Type,
-        };
+        let decl = self.new_decl(ty, DeclarationKind::Type);
         self.declare(&Identifier::fake(name), ResolutionState::Resolved(decl))
     }
 
@@ -148,12 +140,7 @@ impl Resolver {
         };
         let ty = Type::Function(signature.clone());
 
-        let decl = Declaration {
-            id: self.ids.next(),
-            ty,
-            kind: DeclarationKind::Function,
-        };
-
+        let decl = self.new_decl(ty, DeclarationKind::Function);
         self.declare(&Identifier::fake(name), ResolutionState::Resolved(decl))?;
 
         Ok(())
@@ -185,8 +172,8 @@ impl Resolver {
             match &item.kind {
                 ItemKind::Function(f) => {
                     let decl = self.lookup(&f.name)?;
-                    self.res.uses.insert(f.name.node.id, decl.clone());
-                    self.check_function(&decl, f)?;
+                    self.res.uses.insert(f.name.node.id, decl);
+                    self.check_function(decl, f)?;
                 }
 
                 ItemKind::Record(r) => {
@@ -200,7 +187,7 @@ impl Resolver {
         Ok(())
     }
 
-    fn resolve_item(&mut self, item: &Item) -> CompilerResult<Declaration> {
+    fn resolve_item(&mut self, item: &Item) -> CompilerResult<DeclarationId> {
         let decl = match &item.kind {
             ItemKind::Function(function) => {
                 let params = function
@@ -214,14 +201,13 @@ impl Resolver {
                     None => Type::Void,
                 };
 
-                Declaration {
-                    id: self.ids.next(),
-                    ty: Type::Function(Signature {
+                self.new_decl(
+                    Type::Function(Signature {
                         params: Rc::from(params),
                         return_ty: Rc::from(return_ty),
                     }),
-                    kind: DeclarationKind::Function,
-                }
+                    DeclarationKind::Function,
+                )
             }
             ItemKind::Record(record) => {
                 let mut fields = Vec::with_capacity(record.fields.len());
@@ -232,13 +218,12 @@ impl Resolver {
                     })
                 }
 
-                Declaration {
-                    id: self.ids.next(),
-                    ty: Type::Record {
+                self.new_decl(
+                    Type::Record {
                         fields: Rc::from(fields),
                     },
-                    kind: DeclarationKind::Type,
-                }
+                    DeclarationKind::Type,
+                )
             }
         };
         Ok(decl)
@@ -267,48 +252,49 @@ impl Resolver {
             });
         }
 
-        let decl = self.lookup(&ast_ty.name)?;
+        let decl_id = self.lookup(&ast_ty.name)?;
+        let decl = &self.res.declarations[decl_id as usize];
         self.res
             .node_types
             .insert(ast_ty.name.node.id, decl.ty.clone());
-        Ok(decl.ty)
+        Ok(decl.ty.clone())
     }
 
     fn check_function(
         &mut self,
-        func_decl: &Declaration,
+        func_id: DeclarationId,
         function: &Function,
     ) -> CompilerResult<()> {
         self.begin_scope();
         for Param { name, ty } in &function.params {
             let param_ty = self.resolve_ty(ty)?;
-            self.declare_local(&name, param_ty, func_decl.id)?
+            self.declare_local(&name, param_ty, func_id)?
         }
-        self.check_stmt(func_decl, &function.body)?;
+        self.check_stmt(func_id, &function.body)?;
         self.end_scope();
         debug_assert!(self.scopes.len() == 1);
         Ok(())
     }
 
-    fn check_stmt(&mut self, func_decl: &Declaration, stmt: &Stmt) -> CompilerResult<()> {
+    fn check_stmt(&mut self, func_id: DeclarationId, stmt: &Stmt) -> CompilerResult<()> {
         match &stmt.kind {
             StmtKind::Block { statements } => {
                 self.begin_scope();
                 for statement in statements {
-                    self.check_stmt(func_decl, statement)?
+                    self.check_stmt(func_id, statement)?
                 }
                 self.end_scope();
             }
 
             StmtKind::ExprStmt(expr) => {
-                self.check_expr(func_decl, expr)?;
+                self.check_expr(func_id, expr)?;
             }
 
             StmtKind::Declaration { name, ty, value } => {
                 let var_ty = self.resolve_ty(&ty)?;
-                self.declare_local(&name, var_ty.clone(), func_decl.id)?;
+                self.declare_local(&name, var_ty.clone(), func_id)?;
                 if let Some(value) = value {
-                    let initializer_ty = self.check_expr(func_decl, value)?;
+                    let initializer_ty = self.check_expr(func_id, value)?;
                     if var_ty != initializer_ty {
                         return Err(error!(
                             value.node.span,
@@ -319,8 +305,8 @@ impl Resolver {
             }
 
             StmtKind::Assignment { target, value } => {
-                let target_ty = self.check_expr(func_decl, target)?;
-                let value_ty = self.check_expr(func_decl, value)?;
+                let target_ty = self.check_expr(func_id, target)?;
+                let value_ty = self.check_expr(func_id, value)?;
                 if target_ty != value_ty {
                     return Err(error!(
                         value.node.span,
@@ -334,68 +320,70 @@ impl Resolver {
                 then_block,
                 else_block,
             } => {
-                let condition_ty = self.check_expr(func_decl, condition)?;
+                let condition_ty = self.check_expr(func_id, condition)?;
                 if condition_ty != Type::Bool {
                     return Err(error!(
                         condition.node.span,
                         "Type Error: condition should be 'bool', but got {condition_ty:?}"
                     ));
                 }
-                self.check_stmt(func_decl, then_block)?;
+                self.check_stmt(func_id, then_block)?;
                 if let Some(e) = else_block {
-                    self.check_stmt(func_decl, e)?;
+                    self.check_stmt(func_id, e)?;
                 }
             }
 
             StmtKind::While { condition, body } => {
-                let condition_ty = self.check_expr(func_decl, condition)?;
+                let condition_ty = self.check_expr(func_id, condition)?;
                 if condition_ty != Type::Bool {
                     return Err(error!(
                         condition.node.span,
                         "Type Error: condition should be 'bool', but got {condition_ty:?}"
                     ));
                 }
-                self.check_stmt(func_decl, body)?
+                self.check_stmt(func_id, body)?
             }
 
             StmtKind::Return { expr } => {
+                let func_decl = &self.res.declarations[func_id as usize];
                 let Type::Function(signature) = &func_decl.ty else {
                     panic!("Should not happen")
                 };
                 let return_ty = signature.return_ty.clone();
-                let expr_ty = self.check_expr(func_decl, expr)?;
+                let expr_ty = self.check_expr(func_id, expr)?;
                 if expr_ty != *return_ty {
                     return Err(error!(
                         stmt.node.span,
                         "Type Error: return type mismatch, expected {return_ty:?}, but found {expr_ty:?}"
                     ));
                 }
-                self.check_expr(func_decl, expr)?;
+                self.check_expr(func_id, expr)?;
             }
         }
         Ok(())
     }
 
-    fn check_expr(&mut self, func_decl: &Declaration, expr: &Expr) -> CompilerResult<Type> {
+    fn check_expr(&mut self, func_id: DeclarationId, expr: &Expr) -> CompilerResult<Type> {
         let ty = match &expr.kind {
             ExprKind::Literal(LiteralKind::Int(_)) => Type::Int,
             ExprKind::Literal(LiteralKind::Float(_)) => Type::Float,
             ExprKind::Literal(LiteralKind::String { .. }) => Type::Int, // TODO: Add String type
             ExprKind::Literal(LiteralKind::Bool(_)) => Type::Bool,
             ExprKind::Variable(ident) => {
-                let decl = self.lookup(ident)?;
-                self.res.uses.insert(ident.node.id, decl.clone());
-                decl.ty
+                let decl_id = self.lookup(ident)?;
+                let decl = &self.res.declarations[decl_id as usize];
+                self.res.uses.insert(ident.node.id, decl_id);
+                decl.ty.clone()
             }
             ExprKind::ArrayIndex { expr, index } => {
-                let Type::Int = self.check_expr(func_decl, index)? else {
+                let Type::Int = self.check_expr(func_id, index)? else {
                     return Err(error!(
                         index.node.span,
                         "Type Error: Array index must be Int"
                     ));
                 };
 
-                let expr_ty = self.check_expr(func_decl, expr)?;
+                let expr_ty = self.check_expr(func_id, expr)?;
 
                 let Type::Array { inner, .. } = expr_ty else {
                     return Err(error!(
@@ -406,7 +394,7 @@ impl Resolver {
                 (*inner).clone()
             }
             ExprKind::FieldAccess { expr, field } => {
-                let expr_ty = self.check_expr(func_decl, expr)?;
+                let expr_ty = self.check_expr(func_id, expr)?;
                 let Type::Record { fields } = expr_ty else {
                     return Err(error!(
                         expr.node.span,
@@ -426,8 +414,8 @@ impl Resolver {
                 right,
                 operator,
             } => {
-                let left_ty = self.check_expr(func_decl, left)?;
-                let right_ty = self.check_expr(func_decl, right)?;
+                let left_ty = self.check_expr(func_id, left)?;
+                let right_ty = self.check_expr(func_id, right)?;
 
                 if left_ty != right_ty {
                     return Err(error!(
@@ -469,7 +457,7 @@ impl Resolver {
             }
 
             ExprKind::Unary { operator, right } => {
-                let right_ty = self.check_expr(func_decl, right)?;
+                let right_ty = self.check_expr(func_id, right)?;
                 if operator.kind == UnOpKind::Not && right_ty != Type::Bool {
                     return Err(error!(
                         right.node.span,
@@ -481,8 +469,8 @@ impl Resolver {
 
             ExprKind::Call { callee, args } => {
                 if let ExprKind::Variable(ident) = &callee.kind {
-                    let decl = self.lookup(ident)?;
-                    self.res.uses.insert(ident.node.id, decl.clone());
+                    let decl_id = self.lookup(ident)?;
+                    self.res.uses.insert(ident.node.id, decl_id);
 
                     // TODO: hack!
                     if ident.symbol.as_str() == "print" {
@@ -495,7 +483,8 @@ impl Resolver {
                         return Ok(Type::Void);
                     }
 
-                    let Type::Function(signature) = decl.ty else {
+                    let decl = &self.res.declarations[decl_id as usize];
+                    let Type::Function(signature) = decl.ty.clone() else {
                         return Err(error!(
                             ident.node.span,
                             "'{}' is not a function", ident.symbol
@@ -509,7 +498,7 @@ impl Resolver {
                         ));
                     }
                     for (i, arg) in args.iter().enumerate() {
-                        let arg_ty = self.check_expr(func_decl, arg)?;
+                        let arg_ty = self.check_expr(func_id, arg)?;
                         let param_ty = &signature.params[i];
                         if arg_ty != *param_ty {
                             return Err(error!(
