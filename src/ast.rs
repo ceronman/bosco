@@ -207,3 +207,15 @@ pub enum TypeParam {
     Type(Box<Type>),
     Const(u32),
 }
+
+impl Identifier {
+    pub fn fake(s: &str) -> Self {
+        Self {
+            node: Node {
+                id: 0,
+                span: Span(0, 0),
+            },
+            symbol: Symbol::from(s),
+        }
+    }
+}

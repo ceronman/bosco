@@ -555,7 +555,7 @@ fn test_already_declared_var() {
         export fn main() {
             let x int = 1
             let x int = 2
-              //^ Compiler Error: Variable 'x' is already declared in this scope
+              //^ Compiler Error: Name 'x' is already declared in this scope
         }"#,
     );
 }
@@ -565,7 +565,7 @@ fn test_already_declared_param() {
     assert_error(
         r#"
         fn foo(a int, a float) {
-                    //^ Compiler Error: Parameter 'a' is already declared
+                    //^ Compiler Error: Name 'a' is already declared in this scope
         }
         export fn main() {
         }"#,
@@ -592,7 +592,7 @@ fn test_duplicate_function() {
         
         fn foo() {}
         fn foo(x int) int {}
-         //^^^ Compiler Error: Function 'foo' was already declared
+         //^^^ Compiler Error: Name 'foo' is already declared in this scope
         "#,
     );
 }
@@ -605,7 +605,7 @@ fn test_duplicate_function_from_export() {
         }
         
         fn print_int(x int) int {}
-         //^^^^^^^^^ Compiler Error: Function 'print_int' was already declared
+         //^^^^^^^^^ Compiler Error: Name 'print_int' is already declared in this scope
         "#,
     );
 }
@@ -857,7 +857,7 @@ fn test_duplicated_record() {
         }
         
         record Foo {
-             //^^^ Compiler Error: Record 'Foo' was already declared
+             //^^^ Compiler Error: Name 'Foo' is already declared in this scope
             weight float
         }
         "#,
