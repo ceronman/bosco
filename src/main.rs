@@ -5,8 +5,8 @@ mod compiler;
 mod error;
 mod lexer;
 mod parser;
-mod types;
 mod resolver;
+mod types;
 
 fn main() {
     let code = r#"
@@ -16,7 +16,10 @@ fn main() {
         print("Bosco!")
     "#;
     if let Err(error) = compile(code) {
-        eprintln!("Compile error:\n{error}");
+        eprintln!(
+            "Compile error:\n{error} at {:?}\n{:?}",
+            error.span, error.backtrace
+        );
         std::process::exit(1);
     }
 }

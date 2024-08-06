@@ -24,8 +24,8 @@ pub type CompilerResult<T> = Result<T, CompilerError>;
 #[derive(Debug)]
 pub enum ErrorKind {
     Parse,
-    Type,
-    Resolution,
+    // Type,
+    // Resolution,
     Compilation,
 }
 
@@ -33,8 +33,8 @@ impl Display for ErrorKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             ErrorKind::Parse => write!(f, "Parsing Error"),
-            ErrorKind::Type => write!(f, "Type Error"),
-            ErrorKind::Resolution => write!(f, "Resolution Error"),
+            // ErrorKind::Type => write!(f, "Type Error"),
+            // ErrorKind::Resolution => write!(f, "Resolution Error"),
             ErrorKind::Compilation => write!(f, "Compiler Error"),
         }
     }

@@ -110,7 +110,7 @@ impl Resolver {
         func_id: DeclarationId,
     ) -> CompilerResult<()> {
         let decl = self.new_decl(ty, DeclarationKind::Local(func_id));
-        self.declare(ident, ResolutionState::Resolved(decl.clone()))?;
+        self.declare(ident, ResolutionState::Resolved(decl))?;
         self.res.uses.insert(ident.node.id, decl);
         Ok(())
     }
@@ -183,7 +183,7 @@ impl Resolver {
             }
         }
         self.end_scope();
-        debug_assert!(self.scopes.len() == 0);
+        debug_assert!(self.scopes.is_empty());
         Ok(())
     }
 
@@ -245,7 +245,7 @@ impl Resolver {
                     "Array requires a valid size type parameter",
                 ));
             };
-            let inner = self.resolve_ty(&*inner)?;
+            let inner = self.resolve_ty(inner)?;
             return Ok(Type::Array {
                 inner: inner.into(),
                 size: *size,
@@ -268,7 +268,7 @@ impl Resolver {
         self.begin_scope();
         for Param { name, ty } in &function.params {
             let param_ty = self.resolve_ty(ty)?;
-            self.declare_local(&name, param_ty, func_id)?
+            self.declare_local(name, param_ty, func_id)?
         }
         self.check_stmt(func_id, &function.body)?;
         self.end_scope();
@@ -287,14 +287,14 @@ impl Resolver {
             }
 
             StmtKind::ExprStmt(expr) => {
-                self.check_expr(func_id, expr)?;
+                self.check_expr(expr)?;
             }
 
             StmtKind::Declaration { name, ty, value } => {
-                let var_ty = self.resolve_ty(&ty)?;
-                self.declare_local(&name, var_ty.clone(), func_id)?;
+                let var_ty = self.resolve_ty(ty)?;
+                self.declare_local(name, var_ty.clone(), func_id)?;
                 if let Some(value) = value {
-                    let initializer_ty = self.check_expr(func_id, value)?;
+                    let initializer_ty = self.check_expr(value)?;
                     if var_ty != initializer_ty {
                         return Err(error!(
                             value.node.span,
@@ -305,8 +305,8 @@ impl Resolver {
             }
 
             StmtKind::Assignment { target, value } => {
-                let target_ty = self.check_expr(func_id, target)?;
-                let value_ty = self.check_expr(func_id, value)?;
+                let target_ty = self.check_expr(target)?;
+                let value_ty = self.check_expr(value)?;
                 if target_ty != value_ty {
                     return Err(error!(
                         value.node.span,
@@ -320,7 +320,7 @@ impl Resolver {
                 then_block,
                 else_block,
             } => {
-                let condition_ty = self.check_expr(func_id, condition)?;
+                let condition_ty = self.check_expr(condition)?;
                 if condition_ty != Type::Bool {
                     return Err(error!(
                         condition.node.span,
@@ -334,7 +334,7 @@ impl Resolver {
             }
 
             StmtKind::While { condition, body } => {
-                let condition_ty = self.check_expr(func_id, condition)?;
+                let condition_ty = self.check_expr(condition)?;
                 if condition_ty != Type::Bool {
                     return Err(error!(
                         condition.node.span,
@@ -350,20 +350,20 @@ impl Resolver {
                     panic!("Should not happen")
                 };
                 let return_ty = signature.return_ty.clone();
-                let expr_ty = self.check_expr(func_id, expr)?;
+                let expr_ty = self.check_expr(expr)?;
                 if expr_ty != *return_ty {
                     return Err(error!(
                         stmt.node.span,
                         "Type Error: return type mismatch, expected {return_ty:?}, but found {expr_ty:?}"
                     ));
                 }
-                self.check_expr(func_id, expr)?;
+                self.check_expr(expr)?;
             }
         }
         Ok(())
     }
 
-    fn check_expr(&mut self, func_id: DeclarationId, expr: &Expr) -> CompilerResult<Type> {
+    fn check_expr(&mut self, expr: &Expr) -> CompilerResult<Type> {
         let ty = match &expr.kind {
             ExprKind::Literal(LiteralKind::Int(_)) => Type::Int,
             ExprKind::Literal(LiteralKind::Float(_)) => Type::Float,
@@ -376,14 +376,14 @@ impl Resolver {
                 decl.ty.clone()
             }
             ExprKind::ArrayIndex { expr, index } => {
-                let Type::Int = self.check_expr(func_id, index)? else {
+                let Type::Int = self.check_expr(index)? else {
                     return Err(error!(
                         index.node.span,
                         "Type Error: Array index must be Int"
                     ));
                 };
 
-                let expr_ty = self.check_expr(func_id, expr)?;
+                let expr_ty = self.check_expr(expr)?;
 
                 let Type::Array { inner, .. } = expr_ty else {
                     return Err(error!(
@@ -394,7 +394,7 @@ impl Resolver {
                 (*inner).clone()
             }
             ExprKind::FieldAccess { expr, field } => {
-                let expr_ty = self.check_expr(func_id, expr)?;
+                let expr_ty = self.check_expr(expr)?;
                 let Type::Record { fields } = expr_ty else {
                     return Err(error!(
                         expr.node.span,
@@ -414,8 +414,8 @@ impl Resolver {
                 right,
                 operator,
             } => {
-                let left_ty = self.check_expr(func_id, left)?;
-                let right_ty = self.check_expr(func_id, right)?;
+                let left_ty = self.check_expr(left)?;
+                let right_ty = self.check_expr(right)?;
 
                 if left_ty != right_ty {
                     return Err(error!(
@@ -457,7 +457,7 @@ impl Resolver {
             }
 
             ExprKind::Unary { operator, right } => {
-                let right_ty = self.check_expr(func_id, right)?;
+                let right_ty = self.check_expr(right)?;
                 if operator.kind == UnOpKind::Not && right_ty != Type::Bool {
                     return Err(error!(
                         right.node.span,
@@ -498,7 +498,7 @@ impl Resolver {
                         ));
                     }
                     for (i, arg) in args.iter().enumerate() {
-                        let arg_ty = self.check_expr(func_id, arg)?;
+                        let arg_ty = self.check_expr(arg)?;
                         let param_ty = &signature.params[i];
                         if arg_ty != *param_ty {
                             return Err(error!(

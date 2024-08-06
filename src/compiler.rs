@@ -8,12 +8,13 @@ use wasm_encoder::{
 
 use crate::ast;
 use crate::ast::{
-    BinOpKind, Expr, ExprKind, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind, UnOpKind,
+    BinOpKind, Expr, ExprKind, Identifier, ItemKind, LiteralKind, Module, Node, NodeId, Stmt,
+    StmtKind, UnOpKind,
 };
-use crate::resolver::{resolve, DeclarationId, DeclarationKind, Resolution};
 use crate::error::{error, CompilerResult};
 use crate::lexer::Span;
 use crate::parser::parse;
+use crate::resolver::{resolve, DeclarationId, DeclarationKind, Resolution};
 use crate::types::Type;
 
 #[cfg(test)]
@@ -112,6 +113,29 @@ impl Compiler {
         }
     }
 
+    fn lookup_decl(&self, ident: &Identifier) -> CompilerResult<DeclarationId> {
+        self.res
+            .uses
+            .get(&ident.node.id)
+            .copied()
+            .ok_or_else(|| error!(ident.node.span, "Unknown declaration of {}", ident.symbol))
+    }
+
+    fn lookup_addr(&self, ident: &Identifier) -> CompilerResult<&Address> {
+        let decl_id = &self.lookup_decl(ident)?;
+        self.addresses
+            .get(decl_id)
+            .ok_or_else(|| error!(ident.node.span, "Unknown memory of {}", ident.symbol))
+    }
+
+    fn lookup_type(&self, node: Node) -> CompilerResult<Type> {
+        self.res
+            .node_types
+            .get(&node.id)
+            .cloned()
+            .ok_or_else(|| error!(node.span, "Unknown type of node"))
+    }
+
     fn module(&mut self, module: &Module) -> CompilerResult<()> {
         for item in &module.items {
             if let ItemKind::Function(function) = &item.kind {
@@ -122,7 +146,7 @@ impl Compiler {
     }
 
     fn function(&mut self, f: &ast::Function) -> CompilerResult<()> {
-        let func_id = *self.res.uses.get(&f.name.node.id).unwrap();
+        let func_id = self.lookup_decl(&f.name)?;
         let func_decl = &self.res.declarations[func_id as usize];
         let Type::Function(signature) = &func_decl.ty else {
             unreachable!()
@@ -147,7 +171,7 @@ impl Compiler {
             .iter()
             .filter(|d| {
                 if let DeclarationKind::Local(f) = d.kind {
-                    f == func_decl.id
+                    f == func_decl.id && matches!(self.addresses.get(&d.id), Some(Address::Var(_)))
                 } else {
                     false
                 }
@@ -157,7 +181,7 @@ impl Compiler {
 
         // Export
         if f.exported {
-            let Some(Address::Fn(index)) = self.addresses.get(&func_decl.id) else {
+            let Address::Fn(index) = self.lookup_addr(&f.name)? else {
                 unreachable!()
             };
             self.export_section
@@ -188,11 +212,7 @@ impl Compiler {
             StmtKind::Declaration { name, value, .. } => {
                 if let Some(value) = value {
                     self.expression(func, value)?; // TODO: Define what to do when declared var is used in initializer
-                    let Some(decl) = self.res.uses.get(&name.node.id) else {
-                        return Err(error!(name.node.span, "No mem found"));
-                    };
-                    let address = self.addresses.get(decl).unwrap();
-                    match address {
+                    match self.lookup_addr(name)? {
                         Address::Var(index) => {
                             func.instruction(&Instruction::LocalSet(*index));
                         }
@@ -203,9 +223,7 @@ impl Compiler {
 
             StmtKind::Assignment { target, value } => match &target.kind {
                 ExprKind::Variable(name) => {
-                    let decl = self.res.uses.get(&name.node.id).unwrap();
-                    let address = self.addresses.get(decl).unwrap();
-                    let Address::Var(index) = *address else {
+                    let Address::Var(index) = *self.lookup_addr(name)? else {
                         return Err(error!(
                             name.node.span,
                             "Panic: invalid address for variable",
@@ -218,19 +236,19 @@ impl Compiler {
                     self.push_address(func, target)?;
                     self.expression(func, value)?;
 
-                    let instruction = match self.res.node_types.get(&value.node.id) {
+                    let instruction = match self.lookup_type(value.node)? {
                         // TODO: support this via polymorphism
-                        Some(Type::Int) => Instruction::I32Store(MemArg {
+                        Type::Int => Instruction::I32Store(MemArg {
                             offset: 0,
                             align: 2,
                             memory_index: 0,
                         }),
-                        Some(Type::Float) => Instruction::F64Store(MemArg {
+                        Type::Float => Instruction::F64Store(MemArg {
                             offset: 0,
                             align: 3,
                             memory_index: 0,
                         }),
-                        Some(Type::Bool) => Instruction::I32Store8(MemArg {
+                        Type::Bool => Instruction::I32Store8(MemArg {
                             offset: 0,
                             align: 0,
                             memory_index: 0,
@@ -288,18 +306,14 @@ impl Compiler {
     ) -> CompilerResult<Type> {
         match &target.kind {
             ExprKind::Variable(name) => {
-                let decl = self.res.uses.get(&name.node.id).unwrap();
-                let address = self.addresses.get(&decl).unwrap();
-                let Address::Mem(addr) = *address else {
+                let Address::Mem(addr) = *self.lookup_addr(name)? else {
                     return Err(error!(
                         name.node.span,
                         "Panic: invalid address for variable"
                     ));
                 };
                 func.instruction(&Instruction::I32Const(addr as i32));
-                let decl_id = *self.res.uses.get(&name.node.id).expect("local not found");
-                let ty = self.res.declarations[decl_id as usize].ty.clone();
-                Ok(ty)
+                self.lookup_type(name.node)
             }
             ExprKind::ArrayIndex { expr, index } => {
                 let ty = self.push_address(func, expr)?;
@@ -405,14 +419,9 @@ impl Compiler {
                 self.expression(func, left)?;
                 self.expression(func, right)?;
 
-                let Some(ty) = self.res.node_types.get(&left.node.id) else {
-                    return Err(error!(
-                        left.node.span,
-                        "Fatal: Not type found for expression"
-                    ));
-                };
+                let ty = self.lookup_type(left.node)?;
 
-                match (&operator.kind, ty) {
+                match (&operator.kind, &ty) {
                     (BinOpKind::Eq, Type::Int) => func.instruction(&Instruction::I32Eq),
                     (BinOpKind::Eq, Type::Float) => func.instruction(&Instruction::F64Eq),
 
@@ -446,10 +455,11 @@ impl Compiler {
                     (BinOpKind::Mod, Type::Int) => func.instruction(&Instruction::I32RemS),
 
                     _ => {
+                        // TODO: Remove all uses of :? in error formatting
                         return Err(error!(
                             operator.node.span,
                             "Operator '{:?}' is not supported for type {ty:?}", operator.kind
-                        ))
+                        ));
                     }
                 };
             }
@@ -464,14 +474,8 @@ impl Compiler {
                     func.instruction(&Instruction::End);
                 }
                 UnOpKind::Neg => {
-                    let Some(ty) = self.res.node_types.get(&right.node.id) else {
-                        return Err(error!(
-                            right.node.span,
-                            "Fatal: Not type found for expression",
-                        ));
-                    };
-
-                    match ty {
+                    let ty = self.lookup_type(right.node)?;
+                    match &ty {
                         Type::Float => {
                             self.expression(func, right)?;
                             func.instruction(&Instruction::F64Neg);
@@ -492,16 +496,12 @@ impl Compiler {
                 }
             },
 
-            ExprKind::Variable(ident) => {
-                let local = self.res.uses.get(&ident.node.id).unwrap();
-                let address = self.addresses.get(&local).unwrap();
-                match address {
-                    Address::Var(index) => {
-                        func.instruction(&Instruction::LocalGet(*index));
-                    }
-                    _ => todo!(),
+            ExprKind::Variable(ident) => match self.lookup_addr(ident)? {
+                Address::Var(index) => {
+                    func.instruction(&Instruction::LocalGet(*index));
                 }
-            }
+                _ => todo!(),
+            },
 
             ExprKind::ArrayIndex { .. } | ExprKind::FieldAccess { .. } => {
                 let inner = self.push_address(func, expr)?;
@@ -538,9 +538,8 @@ impl Compiler {
                 };
                 let arg = &args[0];
 
-                let decl = self.res.uses.get(&name.node.id).unwrap();
-                let addr = self.addresses.get(&decl).unwrap();
-                let Address::Fn(index) = *addr else {
+                let Address::Fn(index) = *self.lookup_addr(name)? else {
+                    // TODO: remove all unreachables?
                     unreachable!()
                 };
 
