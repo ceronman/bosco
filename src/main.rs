@@ -6,6 +6,7 @@ mod error;
 mod lexer;
 mod parser;
 mod types;
+mod resolver;
 
 fn main() {
     let code = r#"

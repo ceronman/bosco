@@ -10,13 +10,12 @@ use crate::ast;
 use crate::ast::{
     BinOpKind, Expr, ExprKind, ItemKind, LiteralKind, Module, NodeId, Stmt, StmtKind, UnOpKind,
 };
-use crate::compiler::resolver::{resolve, DeclarationId, DeclarationKind, Resolution};
+use crate::resolver::{resolve, DeclarationId, DeclarationKind, Resolution};
 use crate::error::{error, CompilerResult};
 use crate::lexer::Span;
 use crate::parser::parse;
 use crate::types::Type;
 
-mod resolver;
 #[cfg(test)]
 mod test;
 
