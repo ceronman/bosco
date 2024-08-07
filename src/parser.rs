@@ -227,10 +227,13 @@ impl<'src> Parser<'src> {
     }
 
     fn grouping(&mut self) -> CompilerResult<Expr> {
-        self.expect(TokenKind::LParen)?;
+        let lparen = self.expect(TokenKind::LParen)?;
         let inner = self.expression()?;
-        self.expect(TokenKind::RParen)?;
-        Ok(inner)
+        let rparen = self.expect(TokenKind::RParen)?;
+        Ok(Expr {
+            node: self.node(lparen.span, rparen.span),
+            kind: inner.kind,
+        })
     }
 
     fn unary_expr(&mut self) -> CompilerResult<Expr> {

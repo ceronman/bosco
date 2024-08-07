@@ -79,7 +79,6 @@ fn program_test(source: &str, expected_out: &str) {
             );
         }
         Err(dynamic_error) => {
-            // TODO Make CompilerError enum to avoid this kind of duplication
             if let Some(e) = dynamic_error.downcast_ref::<CompilerError>() {
                 let mut buffer = Vec::new();
                 Report::build(ReportKind::Error, (), e.span.0)
@@ -859,6 +858,31 @@ fn test_duplicated_record() {
         record Foo {
              //^^^ Compiler Error: Name 'Foo' is already declared in this scope
             weight float
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_calling_non_function() {
+    assert_error(
+        r#"
+        export fn main() {
+            let foo int = 1
+            foo(2, 3)
+          //^^^ Compiler Error: 'foo' is not a function
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_calling_arbitrary_expressions() {
+    assert_error(
+        r#"
+        export fn main() {
+            (1 + 1)(2, 3)
+          //^^^^^^^ Compiler Error: Arbitrary expressions cannot be called as functions
         }
         "#,
     );

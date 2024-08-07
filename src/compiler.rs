@@ -237,7 +237,7 @@ impl Compiler {
                     self.expression(func, value)?;
 
                     let instruction = match self.lookup_type(value.node)? {
-                        // TODO: support this via polymorphism
+                        // TODO: support this via polymorphism?
                         Type::Int => Instruction::I32Store(MemArg {
                             offset: 0,
                             align: 2,
@@ -552,7 +552,7 @@ impl Compiler {
                         };
                         func.instruction(&Instruction::I32Const(was_str.offset as i32));
                         func.instruction(&Instruction::I32Const(was_str.len as i32));
-                        func.instruction(&Instruction::Call(index)); // FIXME!
+                        func.instruction(&Instruction::Call(index));
                         Ok(())
                     } else {
                         Err(error!(expr.node.span, "Incorrect arguments for 'print'!"))
@@ -563,7 +563,7 @@ impl Compiler {
                     self.expression(func, arg)?;
                 }
 
-                func.instruction(&Instruction::Call(index)); // Fixme
+                func.instruction(&Instruction::Call(index));
             }
         }
         Ok(())

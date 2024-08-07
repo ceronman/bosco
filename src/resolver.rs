@@ -488,7 +488,7 @@ impl Resolver {
                         return Err(error!(
                             ident.node.span,
                             "'{}' is not a function", ident.symbol
-                        )); // TODO: Test
+                        ));
                     };
 
                     if args.len() != signature.params.len() {
@@ -511,7 +511,7 @@ impl Resolver {
                 } else {
                     return Err(error!(
                         callee.node.span,
-                        "First class functions not supported", // TODO: Test this
+                        "Arbitrary expressions cannot be called as functions",
                     ));
                 }
             }
