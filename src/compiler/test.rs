@@ -9,7 +9,7 @@ use crate::error::CompilerError;
 
 fn run_in_wasmi(source: &str) -> anyhow::Result<String> {
     let wasm = compile(source)?;
-    // let wat = wasmprinter::print_bytes(&wasm)?; println!("\n{wat}\n");
+    let wat = wasmprinter::print_bytes(&wasm)?; println!("\n{wat}\n");
     let engine = Engine::default();
     let module = Module::new(&engine, &wasm)?;
 
@@ -349,6 +349,122 @@ fn test_arrays() {
 }
 
 #[test]
+fn test_array_assignment() {
+    program_test(
+        r#"
+            export fn main() {
+                let a Array<int, 2>
+                a[0] = 10
+                a[1] = 20
+                let b Array<int, 2>
+                b[0] = 1
+                b[1] = 2
+                print_int(a[0])
+                print_int(a[1])
+                a = b
+                print_int(a[0])
+                print_int(a[1])
+            }
+        "#,
+        r#"
+            10
+            20
+            1
+            2
+        "#,
+    )
+}
+
+#[test]
+fn test_inner_array_assignment() {
+    program_test(
+        r#"
+            export fn main() {
+                let a Array<Array<int, 3>, 2>
+                a[0][0] = 10
+                a[0][1] = 20
+                a[0][2] = 30
+                let b Array<int, 3>
+                b = a[0]
+                print_int(b[0])
+                print_int(b[1])
+                print_int(b[2])
+            }
+        "#,
+        r#"
+            10
+            20
+            30
+        "#,
+    )
+}
+
+#[test]
+fn test_record_assignment() {
+    program_test(
+        r#"
+            record Point {
+                x int
+                y int
+            }
+            export fn main() {
+                let p1 Point
+                let p2 Point
+                p1.x = 100
+                p1.y = 200
+                p2.x = 10
+                p2.y = 20
+                print_int(p2.x)
+                print_int(p2.y)
+                p2 = p1
+                print_int(p2.x)
+                print_int(p2.y)
+            }
+        "#,
+        r#"
+            10
+            20
+            100
+            200
+        "#,
+    )
+}
+
+#[test]
+fn test_nested_record_assignment() {
+    program_test(
+        r#"
+            record Line {
+                p1 Point
+                p2 Point
+            }
+            record Point {
+                x int
+                y int
+            }
+            export fn main() {
+                let start Point
+                start.x = 50
+                start.y = 80
+                let l1 Line
+                l1.p1 = start
+                l1.p2 = start
+                print_int(l1.p1.x)
+                print_int(l1.p1.y)
+                print_int(l1.p2.x)
+                print_int(l1.p2.y)
+            }
+        "#,
+        r#"
+            50
+            80
+            50
+            80   
+        "#,
+    )
+}
+
+#[test]
 fn test_nested_arrays() {
     program_test(
         r#"
@@ -615,7 +731,7 @@ fn test_assignment_type_mismatch() {
         r#"
         export fn main() {
             let x float = 1
-                        //^ Compiler Error: Type Error: expected Float but found Int
+                        //^ Compiler Error: Type Error: expected float but found int
         }"#,
     );
 }
@@ -627,7 +743,7 @@ fn test_assignment_type_mismatch_2() {
         export fn main() {
             let x int = 1
             let y float = x
-                        //^ Compiler Error: Type Error: expected Float but found Int
+                        //^ Compiler Error: Type Error: expected float but found int
         }"#,
     );
 }
@@ -653,7 +769,7 @@ fn test_type_mismatch_in_if() {
             let x int = 1
             if 2 > 1 {
                 x = 1.5
-                  //^^^ Compiler Error: Type Error: expected Int but found Float
+                  //^^^ Compiler Error: Type Error: expected int but found float
             }
         }"#,
     );
@@ -823,7 +939,7 @@ fn test_nested_array_assignment_type_mismatch() {
         export fn main() {
             let a Array<Array<float, 2>, 5>
             a[0][0] = true
-                    //^^^^ Compiler Error: Type Error: expected Float but found Bool
+                    //^^^^ Compiler Error: Type Error: expected float but found bool
         }
         "#,
     );
@@ -883,6 +999,20 @@ fn test_calling_arbitrary_expressions() {
         export fn main() {
             (1 + 1)(2, 3)
           //^^^^^^^ Compiler Error: Arbitrary expressions cannot be called as functions
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_wrong_array_assignment() {
+    assert_error(
+        r#"
+        export fn main() {
+            let a Array<int, 2>
+            let b Array<int, 3>
+            a = b
+              //^ Compiler Error: Type Error: expected Array<int, 2> but found Array<int, 3>
         }
         "#,
     );

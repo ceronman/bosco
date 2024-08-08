@@ -298,7 +298,7 @@ impl Resolver {
                     if var_ty != initializer_ty {
                         return Err(error!(
                             value.node.span,
-                            "Type Error: expected {var_ty:?} but found {initializer_ty:?}"
+                            "Type Error: expected {var_ty} but found {initializer_ty}"
                         ));
                     }
                 }
@@ -310,7 +310,7 @@ impl Resolver {
                 if target_ty != value_ty {
                     return Err(error!(
                         value.node.span,
-                        "Type Error: expected {target_ty:?} but found {value_ty:?}"
+                        "Type Error: expected {target_ty} but found {value_ty}"
                     ));
                 }
             }

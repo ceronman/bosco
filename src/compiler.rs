@@ -223,14 +223,24 @@ impl Compiler {
 
             StmtKind::Assignment { target, value } => match &target.kind {
                 ExprKind::Variable(name) => {
-                    let Address::Var(index) = *self.lookup_addr(name)? else {
-                        return Err(error!(
-                            name.node.span,
-                            "Panic: invalid address for variable",
-                        ));
-                    };
-                    self.expression(func, value)?;
-                    func.instruction(&Instruction::LocalSet(index));
+                    match *self.lookup_addr(name)? {
+                        Address::Var(index) => {
+                            self.expression(func, value)?;
+                            func.instruction(&Instruction::LocalSet(index));
+                        }
+                        Address::Mem(addr) => {
+                            func.instruction(&Instruction::I32Const(addr as i32)); // destination
+                            let ty = self.push_address(func, value)?; // source
+                            func.instruction(&Instruction::I32Const(ty.size() as i32)); // size
+                            func.instruction(&Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 });
+                        }
+                        _ => {
+                            return Err(error!(
+                                name.node.span,
+                                "Panic: invalid address for variable",
+                            ));
+                        }
+                    }
                 }
                 ExprKind::ArrayIndex { .. } | ExprKind::FieldAccess { .. } => {
                     self.push_address(func, target)?;
@@ -496,9 +506,12 @@ impl Compiler {
                 }
             },
 
-            ExprKind::Variable(ident) => match self.lookup_addr(ident)? {
+            ExprKind::Variable(ident) => match *self.lookup_addr(ident)? {
                 Address::Var(index) => {
-                    func.instruction(&Instruction::LocalGet(*index));
+                    func.instruction(&Instruction::LocalGet(index));
+                }
+                Address::Mem(addr) => {
+                    func.instruction(&Instruction::I32Const(addr as i32));
                 }
                 _ => todo!(),
             },

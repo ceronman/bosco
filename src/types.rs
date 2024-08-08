@@ -1,3 +1,4 @@
+use std::fmt::{write, Display, Formatter};
 use crate::ast::Symbol;
 use std::rc::Rc;
 
@@ -22,4 +23,18 @@ pub struct Signature {
 pub struct Field {
     pub name: Symbol,
     pub ty: Rc<Type>,
+}
+
+impl Display for Type {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::Void => write!(f, "void"),
+            Type::Int => write!(f, "int"),
+            Type::Float => write!(f, "float"),
+            Type::Bool => write!(f, "bool"),
+            Type::Array { inner, size } => write!(f, "Array<{inner}, {size}>"),
+            Type::Record { .. } => write!(f, "record"), // TODO: should probably print record name 
+            Type::Function(_) => write!(f, "function"), // TODO: signature
+        }
+    }
 }
