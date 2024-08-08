@@ -9,7 +9,8 @@ use crate::error::CompilerError;
 
 fn run_in_wasmi(source: &str) -> anyhow::Result<String> {
     let wasm = compile(source)?;
-    let wat = wasmprinter::print_bytes(&wasm)?; println!("\n{wat}\n");
+    let wat = wasmprinter::print_bytes(&wasm)?;
+    println!("\n{wat}\n");
     let engine = Engine::default();
     let module = Module::new(&engine, &wasm)?;
 
@@ -448,6 +449,8 @@ fn test_nested_record_assignment() {
                 start.y = 80
                 let l1 Line
                 l1.p1 = start
+                start.x = 1
+                start.y = 2
                 l1.p2 = start
                 print_int(l1.p1.x)
                 print_int(l1.p1.y)
@@ -458,8 +461,8 @@ fn test_nested_record_assignment() {
         r#"
             50
             80
-            50
-            80   
+            1
+            2   
         "#,
     )
 }

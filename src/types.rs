@@ -1,5 +1,5 @@
-use std::fmt::{write, Display, Formatter};
 use crate::ast::Symbol;
+use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -33,7 +33,7 @@ impl Display for Type {
             Type::Float => write!(f, "float"),
             Type::Bool => write!(f, "bool"),
             Type::Array { inner, size } => write!(f, "Array<{inner}, {size}>"),
-            Type::Record { .. } => write!(f, "record"), // TODO: should probably print record name 
+            Type::Record { .. } => write!(f, "record"), // TODO: should probably print record name
             Type::Function(_) => write!(f, "function"), // TODO: signature
         }
     }

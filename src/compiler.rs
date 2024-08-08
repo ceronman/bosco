@@ -222,6 +222,7 @@ impl Compiler {
             }
 
             StmtKind::Assignment { target, value } => match &target.kind {
+                // TODO: Unify variable, array_index, and field_access
                 ExprKind::Variable(name) => {
                     match *self.lookup_addr(name)? {
                         Address::Var(index) => {
@@ -232,7 +233,10 @@ impl Compiler {
                             func.instruction(&Instruction::I32Const(addr as i32)); // destination
                             let ty = self.push_address(func, value)?; // source
                             func.instruction(&Instruction::I32Const(ty.size() as i32)); // size
-                            func.instruction(&Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 });
+                            func.instruction(&Instruction::MemoryCopy {
+                                src_mem: 0,
+                                dst_mem: 0,
+                            });
                         }
                         _ => {
                             return Err(error!(
@@ -243,8 +247,8 @@ impl Compiler {
                     }
                 }
                 ExprKind::ArrayIndex { .. } | ExprKind::FieldAccess { .. } => {
-                    self.push_address(func, target)?;
-                    self.expression(func, value)?;
+                    self.push_address(func, target)?; // destination
+                    self.expression(func, value)?; // source
 
                     let instruction = match self.lookup_type(value.node)? {
                         // TODO: support this via polymorphism?
@@ -263,8 +267,12 @@ impl Compiler {
                             align: 0,
                             memory_index: 0,
                         }),
-                        _ => {
-                            return Err(error!(value.node.span, "Can't store expression in Array",))
+                        ty => {
+                            func.instruction(&Instruction::I32Const(ty.size() as i32)); // size
+                            Instruction::MemoryCopy {
+                                src_mem: 0,
+                                dst_mem: 0,
+                            }
                         }
                     };
                     func.instruction(&instruction);
