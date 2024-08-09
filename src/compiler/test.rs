@@ -467,6 +467,39 @@ fn test_nested_record_assignment() {
 }
 
 #[test]
+fn test_nested_record_assignment_2() {
+    program_test(
+        r#"
+            record Line {
+                p1 Point
+                p2 Point
+            }
+            record Point {
+                x int
+                y int
+            }
+            export fn main() {
+                let line Line
+                line.p1.x = 1
+                line.p1.y = 5
+                line.p2 = line.p1
+                
+                print_int(line.p1.x)
+                print_int(line.p1.y)
+                print_int(line.p2.x)
+                print_int(line.p2.y)
+            }
+        "#,
+        r#"
+            1
+            5
+            1
+            5
+        "#,
+    )
+}
+
+#[test]
 fn test_nested_arrays() {
     program_test(
         r#"

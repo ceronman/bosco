@@ -525,26 +525,34 @@ impl Compiler {
             },
 
             ExprKind::ArrayIndex { .. } | ExprKind::FieldAccess { .. } => {
-                let inner = self.push_address(func, expr)?;
-                let load_instruction = match inner {
-                    Type::Int => Instruction::I32Load(MemArg {
-                        offset: 0,
-                        align: 2,
-                        memory_index: 0,
-                    }),
-                    Type::Float => Instruction::F64Load(MemArg {
-                        offset: 0,
-                        align: 3,
-                        memory_index: 0,
-                    }),
-                    Type::Bool => Instruction::I32Load8S(MemArg {
-                        offset: 0,
-                        align: 0,
-                        memory_index: 0,
-                    }),
-                    _ => return Err(error!(expr.node.span, "Unsupported type of array")),
+                match self.push_address(func, expr)? {
+                    Type::Int => {
+                        func.instruction(
+                            &Instruction::I32Load(MemArg {
+                            offset: 0,
+                            align: 2,
+                            memory_index: 0,
+                        }));
+                    }
+                    Type::Float => {
+                        func.instruction(
+                            &Instruction::F64Load(MemArg {
+                                offset: 0,
+                                align: 3,
+                                memory_index: 0,
+                            }));
+                    }
+                    Type::Bool => {
+                        func.instruction(
+                            &Instruction::I32Load8S(MemArg {
+                                offset: 0,
+                                align: 0,
+                                memory_index: 0,
+                            })
+                        );
+                    }
+                    _ => {}
                 };
-                func.instruction(&load_instruction);
             }
 
             ExprKind::Call { callee, args } => {
