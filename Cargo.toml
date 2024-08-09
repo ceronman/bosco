@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-wasm-encoder = "0.214.0"
+wasm-encoder = "0.215.0"
 
 [dev-dependencies]
 anyhow = "1.0.86"
-wasmi = "0.35.0"
-wasmprinter = "0.214.0"
+wasmi = "0.36.0"
+wasmprinter = "0.215.0"
 ariadne = "0.4.1"
 regex = "1.10.5"
