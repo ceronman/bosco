@@ -393,7 +393,10 @@ impl Resolver {
                 };
                 (*inner).clone()
             }
-            ExprKind::FieldAccess { expr: receiver, field } => {
+            ExprKind::FieldAccess {
+                expr: receiver,
+                field,
+            } => {
                 let receiver_ty = self.check_expr(receiver)?;
                 let Type::Record { fields } = receiver_ty else {
                     return Err(error!(

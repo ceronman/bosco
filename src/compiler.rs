@@ -60,6 +60,11 @@ impl Type {
     }
 }
 
+enum MemOp {
+    Local(u32),
+    Mem(Type),
+}
+
 #[derive(Default)]
 struct Compiler {
     res: Resolution,
@@ -222,60 +227,50 @@ impl Compiler {
             }
 
             StmtKind::Assignment { target, value } => match &target.kind {
-                // TODO: Unify variable, array_index, and field_access
-                ExprKind::Variable(name) => {
-                    match *self.lookup_addr(name)? {
-                        Address::Var(index) => {
-                            self.expression(func, value)?;
+                ExprKind::Variable(_)
+                | ExprKind::ArrayIndex { .. }
+                | ExprKind::FieldAccess { .. } => {
+                    let mem_op = self.push_address(func, target)?; // destination
+                    self.expression(func, value)?; // source
+
+                    match mem_op {
+                        MemOp::Local(index) => {
                             func.instruction(&Instruction::LocalSet(index));
                         }
-                        Address::Mem(addr) => {
-                            func.instruction(&Instruction::I32Const(addr as i32)); // destination
-                            let ty = self.push_address(func, value)?; // source
+
+                        // TODO: support this via polymorphism?
+                        MemOp::Mem(Type::Int) => {
+                            func.instruction(&Instruction::I32Store(MemArg {
+                                offset: 0,
+                                align: 2,
+                                memory_index: 0,
+                            }));
+                        }
+
+                        MemOp::Mem(Type::Float) => {
+                            func.instruction(&Instruction::F64Store(MemArg {
+                                offset: 0,
+                                align: 3,
+                                memory_index: 0,
+                            }));
+                        }
+
+                        MemOp::Mem(Type::Bool) => {
+                            func.instruction(&Instruction::I32Store8(MemArg {
+                                offset: 0,
+                                align: 0,
+                                memory_index: 0,
+                            }));
+                        }
+
+                        MemOp::Mem(ty) => {
                             func.instruction(&Instruction::I32Const(ty.size() as i32)); // size
                             func.instruction(&Instruction::MemoryCopy {
                                 src_mem: 0,
                                 dst_mem: 0,
                             });
                         }
-                        _ => {
-                            return Err(error!(
-                                name.node.span,
-                                "Panic: invalid address for variable",
-                            ));
-                        }
-                    }
-                }
-                ExprKind::ArrayIndex { .. } | ExprKind::FieldAccess { .. } => {
-                    self.push_address(func, target)?; // destination
-                    self.expression(func, value)?; // source
-
-                    let instruction = match self.lookup_type(value.node)? {
-                        // TODO: support this via polymorphism?
-                        Type::Int => Instruction::I32Store(MemArg {
-                            offset: 0,
-                            align: 2,
-                            memory_index: 0,
-                        }),
-                        Type::Float => Instruction::F64Store(MemArg {
-                            offset: 0,
-                            align: 3,
-                            memory_index: 0,
-                        }),
-                        Type::Bool => Instruction::I32Store8(MemArg {
-                            offset: 0,
-                            align: 0,
-                            memory_index: 0,
-                        }),
-                        ty => {
-                            func.instruction(&Instruction::I32Const(ty.size() as i32)); // size
-                            Instruction::MemoryCopy {
-                                src_mem: 0,
-                                dst_mem: 0,
-                            }
-                        }
                     };
-                    func.instruction(&instruction);
                 }
                 _ => {
                     return Err(error!(
@@ -321,22 +316,20 @@ impl Compiler {
         &mut self,
         func: &mut wasm_encoder::Function,
         target: &Expr,
-    ) -> CompilerResult<Type> {
+    ) -> CompilerResult<MemOp> {
         match &target.kind {
-            ExprKind::Variable(name) => {
-                let Address::Mem(addr) = *self.lookup_addr(name)? else {
-                    return Err(error!(
-                        name.node.span,
-                        "Panic: invalid address for variable"
-                    ));
-                };
-                func.instruction(&Instruction::I32Const(addr as i32));
-                self.lookup_type(name.node)
-            }
+            ExprKind::Variable(name) => match *self.lookup_addr(name)? {
+                Address::Var(index) => Ok(MemOp::Local(index)),
+                Address::Mem(addr) => {
+                    func.instruction(&Instruction::I32Const(addr as i32));
+                    self.lookup_type(name.node).map(MemOp::Mem)
+                }
+                _ => todo!(),
+            },
             ExprKind::ArrayIndex { expr, index } => {
                 let ty = self.push_address(func, expr)?;
                 // TODO: Check bounds
-                let Type::Array { inner, .. } = ty else {
+                let MemOp::Mem(Type::Array { inner, .. }) = ty else {
                     return Err(error!(
                         expr.node.span,
                         "Panic: trying to index something that is not an array",
@@ -346,12 +339,12 @@ impl Compiler {
                 func.instruction(&Instruction::I32Const(inner.size() as i32));
                 func.instruction(&Instruction::I32Mul);
                 func.instruction(&Instruction::I32Add);
-                Ok((*inner).clone())
+                Ok(MemOp::Mem((*inner).clone()))
             }
 
             ExprKind::FieldAccess { expr, field } => {
                 let ty = self.push_address(func, expr)?;
-                let Type::Record { fields } = ty.clone() else {
+                let MemOp::Mem(Type::Record { fields }) = ty else {
                     return Err(error!(
                         field.node.span,
                         "Panic: trying to get a field of something that is not a record",
@@ -371,7 +364,7 @@ impl Compiler {
                 };
                 func.instruction(&Instruction::I32Const(offset as i32));
                 func.instruction(&Instruction::I32Add);
-                Ok((*field_ty).clone())
+                Ok(MemOp::Mem((*field_ty).clone()))
             }
 
             _ => todo!(),
@@ -514,42 +507,31 @@ impl Compiler {
                 }
             },
 
-            ExprKind::Variable(ident) => match *self.lookup_addr(ident)? {
-                Address::Var(index) => {
-                    func.instruction(&Instruction::LocalGet(index));
-                }
-                Address::Mem(addr) => {
-                    func.instruction(&Instruction::I32Const(addr as i32));
-                }
-                _ => todo!(),
-            },
-
-            ExprKind::ArrayIndex { .. } | ExprKind::FieldAccess { .. } => {
+            ExprKind::Variable(_) | ExprKind::ArrayIndex { .. } | ExprKind::FieldAccess { .. } => {
                 match self.push_address(func, expr)? {
-                    Type::Int => {
-                        func.instruction(
-                            &Instruction::I32Load(MemArg {
+                    MemOp::Mem(Type::Int) => {
+                        func.instruction(&Instruction::I32Load(MemArg {
                             offset: 0,
                             align: 2,
                             memory_index: 0,
                         }));
                     }
-                    Type::Float => {
-                        func.instruction(
-                            &Instruction::F64Load(MemArg {
-                                offset: 0,
-                                align: 3,
-                                memory_index: 0,
-                            }));
+                    MemOp::Mem(Type::Float) => {
+                        func.instruction(&Instruction::F64Load(MemArg {
+                            offset: 0,
+                            align: 3,
+                            memory_index: 0,
+                        }));
                     }
-                    Type::Bool => {
-                        func.instruction(
-                            &Instruction::I32Load8S(MemArg {
-                                offset: 0,
-                                align: 0,
-                                memory_index: 0,
-                            })
-                        );
+                    MemOp::Mem(Type::Bool) => {
+                        func.instruction(&Instruction::I32Load8S(MemArg {
+                            offset: 0,
+                            align: 0,
+                            memory_index: 0,
+                        }));
+                    }
+                    MemOp::Local(index) => {
+                        func.instruction(&Instruction::LocalGet(index));
                     }
                     _ => {}
                 };
