@@ -388,17 +388,17 @@ impl Resolver {
                 let Type::Array { inner, .. } = expr_ty else {
                     return Err(error!(
                         expr.node.span,
-                        "Type Error: Expecting an Array, found {expr_ty:?}"
+                        "Type Error: {expr_ty} is not an array and cannot be indexed"
                     ));
                 };
                 (*inner).clone()
             }
-            ExprKind::FieldAccess { expr, field } => {
-                let expr_ty = self.check_expr(expr)?;
-                let Type::Record { fields } = expr_ty else {
+            ExprKind::FieldAccess { expr: receiver, field } => {
+                let receiver_ty = self.check_expr(receiver)?;
+                let Type::Record { fields } = receiver_ty else {
                     return Err(error!(
                         expr.node.span,
-                        "Type Error: Expecting an Record, found {expr_ty:?}"
+                        "Type Error: {receiver_ty} is not a record and does not have fields"
                     ));
                 };
                 let Some(field) = fields.iter().find(|f| f.name == field.symbol) else {

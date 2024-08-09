@@ -9,8 +9,7 @@ use crate::error::CompilerError;
 
 fn run_in_wasmi(source: &str) -> anyhow::Result<String> {
     let wasm = compile(source)?;
-    let wat = wasmprinter::print_bytes(&wasm)?;
-    println!("\n{wat}\n");
+    // let wat = wasmprinter::print_bytes(&wasm)?; println!("\n{wat}\n");
     let engine = Engine::default();
     let module = Module::new(&engine, &wasm)?;
 
@@ -903,7 +902,7 @@ fn test_array_index_type_mismatch() {
         export fn main() {
             let a int = 1
             let b int = a[1]
-                      //^ Compiler Error: Type Error: Expecting an Array, found Int
+                      //^ Compiler Error: Type Error: int is not an array and cannot be indexed
         }
         "#,
     );
@@ -916,7 +915,7 @@ fn test_array_index_assignment_type_mismatch() {
         export fn main() {
             let a int = 1
             a[1] = 2
-          //^ Compiler Error: Type Error: Expecting an Array, found Int
+          //^ Compiler Error: Type Error: int is not an array and cannot be indexed
         }
         "#,
     );
@@ -977,6 +976,19 @@ fn test_duplicated_record() {
         record Foo {
              //^^^ Compiler Error: Name 'Foo' is already declared in this scope
             weight float
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_get_field_of_no_record() {
+    assert_error(
+        r#"
+        export fn main() {
+            let x Array<int, 2>
+            print_int(x.foo)
+                    //^^^^^ Compiler Error: Type Error: Array<int, 2> is not a record and does not have fields
         }
         "#,
     );
