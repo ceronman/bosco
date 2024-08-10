@@ -627,6 +627,34 @@ fn test_nested_records_forward_declaration() {
     )
 }
 
+#[test]
+fn test_record_argument() {
+    program_test(
+        r#"
+            record Point {
+                x int
+                y int
+            }
+
+            export fn main() {
+                let point Point
+                point.x = 1
+                point.y = 2
+                print_point(point)
+            }
+            
+            fn print_point(p Point) {
+                print_int(p.x)
+                print_int(p.y)
+            }
+        "#,
+        r#"
+            1
+            2
+        "#,
+    )
+}
+
 fn assert_error(annotated_source: &str) {
     let error_re = Regex::new(r"^\s*//\s*(\^*)\s+(.*)\n$").unwrap();
     let mut source = String::new();
