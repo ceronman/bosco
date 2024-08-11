@@ -1,6 +1,6 @@
-use std::fmt::{Display, Formatter};
-
 use crate::lexer::Span;
+use std::fmt::{Display, Formatter};
+use std::rc::Rc;
 
 pub type NodeId = u32;
 
@@ -31,12 +31,10 @@ pub struct Node {
     pub span: Span,
 }
 
-// TODO: Decide if Clone is the best thing to do here, or lifetimes instead.
-// If decided for Clone, then make pointers Rc instead of Box.
 #[derive(Debug, Clone)]
 pub struct Module {
     pub _node: Node,
-    pub items: Vec<Item>,
+    pub items: Rc<[Item]>,
 }
 
 #[derive(Debug, Clone)]
@@ -56,14 +54,14 @@ pub struct Function {
     pub exported: bool,
     pub name: Identifier,
     pub return_ty: Option<Type>,
-    pub params: Vec<Param>,
+    pub params: Rc<[Param]>,
     pub body: Stmt,
 }
 
 #[derive(Debug, Clone)]
 pub struct Record {
     pub name: Identifier,
-    pub fields: Vec<Field>,
+    pub fields: Rc<[Field]>,
 }
 
 #[derive(Debug, Clone)]
@@ -88,7 +86,7 @@ pub struct Stmt {
 pub enum StmtKind {
     ExprStmt(Expr),
     Block {
-        statements: Vec<Stmt>,
+        statements: Rc<[Stmt]>,
     },
     Declaration {
         name: Identifier,
@@ -101,12 +99,12 @@ pub enum StmtKind {
     },
     If {
         condition: Expr,
-        then_block: Box<Stmt>,
-        else_block: Option<Box<Stmt>>,
+        then_block: Rc<Stmt>,
+        else_block: Option<Rc<Stmt>>,
     },
     While {
         condition: Expr,
-        body: Box<Stmt>,
+        body: Rc<Stmt>,
     },
     Return {
         expr: Expr,
@@ -124,25 +122,25 @@ pub enum ExprKind {
     Literal(LiteralKind),
     Variable(Identifier),
     ArrayIndex {
-        expr: Box<Expr>,
-        index: Box<Expr>,
+        expr: Rc<Expr>,
+        index: Rc<Expr>,
     },
     FieldAccess {
-        expr: Box<Expr>,
+        expr: Rc<Expr>,
         field: Identifier,
     },
     Unary {
         operator: UnOp,
-        right: Box<Expr>,
+        right: Rc<Expr>,
     },
     Binary {
         operator: BinOp,
-        left: Box<Expr>,
-        right: Box<Expr>,
+        left: Rc<Expr>,
+        right: Rc<Expr>,
     },
     Call {
-        callee: Box<Expr>,
-        args: Vec<Expr>,
+        callee: Rc<Expr>,
+        args: Rc<[Expr]>,
     },
 }
 
@@ -199,12 +197,12 @@ pub struct Identifier {
 pub struct Type {
     pub node: Node,
     pub name: Identifier,
-    pub params: Vec<TypeParam>,
+    pub params: Rc<[TypeParam]>,
 }
 
 #[derive(Debug, Clone)]
 pub enum TypeParam {
-    Type(Box<Type>),
+    Type(Rc<Type>),
     Const(u32),
 }
 

@@ -142,7 +142,7 @@ impl Compiler {
     }
 
     fn module(&mut self, module: &Module) -> CompilerResult<()> {
-        for item in &module.items {
+        for item in module.items.iter() {
             if let ItemKind::Function(function) = &item.kind {
                 self.function(function)?;
             }
@@ -204,7 +204,7 @@ impl Compiler {
     fn statement(&mut self, func: &mut wasm_encoder::Function, stmt: &Stmt) -> CompilerResult<()> {
         match &stmt.kind {
             StmtKind::Block { statements } => {
-                for statement in statements {
+                for statement in statements.iter() {
                     self.statement(func, statement)?;
                 }
             }
@@ -570,7 +570,7 @@ impl Compiler {
                     };
                 }
 
-                for arg in args {
+                for arg in args.iter() {
                     self.expression(func, arg)?;
                 }
 

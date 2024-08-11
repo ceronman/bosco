@@ -147,7 +147,7 @@ impl Resolver {
     }
 
     fn collect_top_level_types(&mut self, module: &Module) -> CompilerResult<()> {
-        for item in &module.items {
+        for item in module.items.iter() {
             // TODO: Maybe record and function can share some data here.
             let name = match &item.kind {
                 ItemKind::Function(f) => &f.name,
@@ -168,7 +168,7 @@ impl Resolver {
         self.declare_builtins()?;
         self.collect_top_level_types(module)?;
 
-        for item in &module.items {
+        for item in module.items.iter() {
             match &item.kind {
                 ItemKind::Function(f) => {
                     let decl = self.lookup(&f.name)?;
@@ -211,7 +211,7 @@ impl Resolver {
             }
             ItemKind::Record(record) => {
                 let mut fields = Vec::with_capacity(record.fields.len());
-                for f in &record.fields {
+                for f in record.fields.iter() {
                     fields.push(Field {
                         name: f.name.symbol.clone(),
                         ty: self.resolve_ty(&f.ty)?.into(),
@@ -266,7 +266,7 @@ impl Resolver {
         function: &Function,
     ) -> CompilerResult<()> {
         self.begin_scope();
-        for Param { name, ty } in &function.params {
+        for Param { name, ty } in function.params.iter() {
             let param_ty = self.resolve_ty(ty)?;
             self.declare_local(name, param_ty, func_id)?
         }
@@ -280,7 +280,7 @@ impl Resolver {
         match &stmt.kind {
             StmtKind::Block { statements } => {
                 self.begin_scope();
-                for statement in statements {
+                for statement in statements.iter() {
                     self.check_stmt(func_id, statement)?
                 }
                 self.end_scope();

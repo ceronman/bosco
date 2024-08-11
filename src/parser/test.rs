@@ -1,4 +1,5 @@
 use std::fmt::{Debug, Formatter};
+use std::rc::Rc;
 use std::str::Chars;
 
 use ariadne::{Label, Report, ReportKind, Source};
@@ -210,7 +211,7 @@ impl SExpr for LiteralKind {
     }
 }
 
-impl<T: SExpr> SExpr for Vec<T> {
+impl<T: SExpr> SExpr for Rc<[T]> {
     fn s_expr(&self) -> String {
         format!(
             "{}",
@@ -222,7 +223,7 @@ impl<T: SExpr> SExpr for Vec<T> {
     }
 }
 
-impl<T: SExpr> SExpr for Option<Box<T>> {
+impl<T: SExpr> SExpr for Option<Rc<T>> {
     fn s_expr(&self) -> String {
         match self {
             None => "".to_string(),

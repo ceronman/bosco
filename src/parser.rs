@@ -5,6 +5,7 @@ use crate::ast::{
 };
 use crate::error::{parse_error, CompilerResult};
 use crate::lexer::{Lexer, Span, Token, TokenKind};
+use std::rc::Rc;
 
 #[cfg(test)]
 mod test;
@@ -39,7 +40,7 @@ impl<'src> Parser<'src> {
         let end = items.last().map(|i| i.node.span).unwrap_or(Span(0, 0));
         Ok(Module {
             _node: self.node(start, end),
-            items,
+            items: items.into(),
         })
     }
 
@@ -84,7 +85,7 @@ impl<'src> Parser<'src> {
                 exported,
                 name,
                 return_ty,
-                params,
+                params: params.into(),
                 body,
             }),
         })
@@ -104,7 +105,10 @@ impl<'src> Parser<'src> {
         let rparen = self.expect(TokenKind::RBrace)?;
         Ok(Item {
             node: self.node(record_keyword.span, rparen.span),
-            kind: ItemKind::Record(Record { name, fields }),
+            kind: ItemKind::Record(Record {
+                name,
+                fields: fields.into(),
+            }),
         })
     }
 
@@ -137,14 +141,14 @@ impl<'src> Parser<'src> {
         Ok(Type {
             node: self.node(name.node.span, end),
             name,
-            params,
+            params: params.into(),
         })
     }
 
     fn type_parameter(&mut self) -> CompilerResult<TypeParam> {
         let token = self.token;
         let param = match token.kind {
-            TokenKind::Identifier => TypeParam::Type(Box::new(self.ty()?)),
+            TokenKind::Identifier => TypeParam::Type(Rc::new(self.ty()?)),
             TokenKind::Int => {
                 // TODO: Duplicate with literal int parsing
                 let value = token.span.as_str(self.source);
@@ -246,7 +250,7 @@ impl<'src> Parser<'src> {
             node: self.node(operator.node.span, right.node.span),
             kind: ExprKind::Unary {
                 operator,
-                right: Box::new(right),
+                right: Rc::new(right),
             },
         })
     }
@@ -268,8 +272,8 @@ impl<'src> Parser<'src> {
         Ok(Expr {
             node: self.node(prefix.node.span, rparen.span),
             kind: ExprKind::Call {
-                callee: Box::new(prefix),
-                args,
+                callee: Rc::new(prefix),
+                args: args.into(),
             },
         })
     }
@@ -282,8 +286,8 @@ impl<'src> Parser<'src> {
         Ok(Expr {
             node: self.node(prefix.node.span, rbracket.span),
             kind: ExprKind::ArrayIndex {
-                expr: Box::new(prefix),
-                index: Box::new(index),
+                expr: Rc::new(prefix),
+                index: Rc::new(index),
             },
         })
     }
@@ -296,7 +300,7 @@ impl<'src> Parser<'src> {
         Ok(Expr {
             node: self.node(prefix.node.span, field.node.span),
             kind: ExprKind::FieldAccess {
-                expr: Box::new(prefix),
+                expr: Rc::new(prefix),
                 field,
             },
         })
@@ -308,8 +312,8 @@ impl<'src> Parser<'src> {
         Ok(Expr {
             node: self.node(prefix.node.span, right.node.span),
             kind: ExprKind::Binary {
-                left: Box::new(prefix),
-                right: Box::new(right),
+                left: Rc::new(prefix),
+                right: Rc::new(right),
                 operator,
             },
         })
@@ -499,8 +503,8 @@ impl<'src> Parser<'src> {
             ),
             kind: StmtKind::If {
                 condition,
-                then_block: Box::new(then_block),
-                else_block: else_block.map(Box::new),
+                then_block: Rc::new(then_block),
+                else_block: else_block.map(Rc::new),
             },
         })
     }
@@ -517,7 +521,9 @@ impl<'src> Parser<'src> {
         self.maybe_eol();
         Ok(Stmt {
             node: self.node(lbrace.span, rbrace.span),
-            kind: StmtKind::Block { statements },
+            kind: StmtKind::Block {
+                statements: statements.into(),
+            },
         })
     }
 
@@ -529,7 +535,7 @@ impl<'src> Parser<'src> {
             node: self.node(while_kw.span, body.node.span),
             kind: StmtKind::While {
                 condition,
-                body: Box::new(body),
+                body: Rc::new(body),
             },
         })
     }
