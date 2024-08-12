@@ -14,7 +14,7 @@ use crate::ast::{
 use crate::error::{error, CompilerResult};
 use crate::lexer::Span;
 use crate::parser::parse;
-use crate::resolver::{resolve, DeclarationId, DeclarationKind, Resolution};
+use crate::resolver::{resolve, Declaration, DeclarationId, DeclarationKind, Resolution};
 use crate::types::Type;
 
 #[cfg(test)]
@@ -118,18 +118,19 @@ impl Compiler {
         }
     }
 
-    fn lookup_decl(&self, ident: &Identifier) -> CompilerResult<DeclarationId> {
-        self.res
+    fn lookup_decl(&self, ident: &Identifier) -> CompilerResult<&Declaration> {
+        let decl_id = self.res
             .uses
             .get(&ident.node.id)
             .copied()
-            .ok_or_else(|| error!(ident.node.span, "Unknown declaration of {}", ident.symbol))
+            .ok_or_else(|| error!(ident.node.span, "Unknown declaration of {}", ident.symbol))?;
+        self.res.declarations.get(decl_id as usize).ok_or_else(|| error!(ident.node.span, "Declaration does not exist"))
     }
 
     fn lookup_addr(&self, ident: &Identifier) -> CompilerResult<&Address> {
-        let decl_id = &self.lookup_decl(ident)?;
+        let decl = self.lookup_decl(ident)?;
         self.addresses
-            .get(decl_id)
+            .get(&decl.id)
             .ok_or_else(|| error!(ident.node.span, "Unknown memory of {}", ident.symbol))
     }
 
@@ -139,6 +140,20 @@ impl Compiler {
             .get(&node.id)
             .cloned()
             .ok_or_else(|| error!(node.span, "Unknown type of node"))
+    }
+
+    fn lookup_function_locals(&self, decl_id: DeclarationId) -> impl Iterator<Item=&Declaration> {
+        self
+            .res
+            .declarations
+            .iter()
+            .filter(move |d| {
+                if let DeclarationKind::Local(f) = d.kind {
+                    f == decl_id
+                } else {
+                    false
+                }
+            })
     }
 
     fn module(&mut self, module: &Module) -> CompilerResult<()> {
@@ -151,8 +166,7 @@ impl Compiler {
     }
 
     fn function(&mut self, f: &ast::Function) -> CompilerResult<()> {
-        let func_id = self.lookup_decl(&f.name)?;
-        let func_decl = &self.res.declarations[func_id as usize];
+        let func_decl = self.lookup_decl(&f.name)?;
         let Type::Function(signature) = &func_decl.ty else {
             unreachable!()
         };
@@ -166,23 +180,15 @@ impl Compiler {
         } else {
             &[signature.return_ty.as_wasm()?]
         };
+
+        let locals = self.lookup_function_locals(func_decl.id)
+            .skip(params.len())
+            .map(|d| d.ty.as_wasm().map(|w| (1, w)))
+            .collect::<CompilerResult<Vec<(u32, ValType)>>>()?;
+
         let type_index = self.type_section.len();
         self.type_section.function(params, returns.iter().copied());
         self.function_section.function(type_index);
-
-        let locals = self
-            .res
-            .declarations
-            .iter()
-            .filter(|d| {
-                if let DeclarationKind::Local(f) = d.kind {
-                    f == func_decl.id && matches!(self.addresses.get(&d.id), Some(Address::Var(_)))
-                } else {
-                    false
-                }
-            })
-            .map(|d| d.ty.as_wasm().map(|w| (1, w)))
-            .collect::<CompilerResult<Vec<(u32, ValType)>>>()?;
 
         // Export
         if f.exported {
@@ -547,7 +553,6 @@ impl Compiler {
                         ))
                     }
                 };
-                let arg = &args[0];
 
                 let Address::Fn(index) = *self.lookup_addr(name)? else {
                     // TODO: remove all unreachables?
@@ -556,6 +561,7 @@ impl Compiler {
 
                 // TODO: Hack!
                 if name.symbol.as_str() == "print" {
+                    let arg = &args[0];
                     return if let ExprKind::Literal(LiteralKind::String(_)) = &arg.kind {
                         self.expression(func, arg)?; // Needed to add the string value to data
                         let Some(was_str) = self.strings.get(&arg.node.id) else {
@@ -570,7 +576,11 @@ impl Compiler {
                     };
                 }
 
-                for arg in args.iter() {
+                let Type::Function(signature) = &self.lookup_decl(name)?.ty.clone() else {
+                    unreachable!()
+                };
+
+                for (arg, ty) in args.iter().zip(signature.params.iter()) {
                     self.expression(func, arg)?;
                 }
 
