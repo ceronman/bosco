@@ -244,10 +244,21 @@ impl Compiler {
 
             StmtKind::Declaration { name, value, .. } => {
                 if let Some(value) = value {
-                    self.expression(func, value)?; // TODO: Define what to do when declared var is used in initializer
-                    match self.lookup_addr(name)? {
+                    // TODO: Define what to do when declared var is used in initializer
+                    match *self.lookup_addr(name)? {
                         Address::Var(index) => {
-                            func.instruction(&Instruction::LocalSet(*index));
+                            self.expression(func, value)?;
+                            func.instruction(&Instruction::LocalSet(index));
+                        }
+                        Address::Mem(addr) => {
+                            let ty = self.lookup_decl(name)?.ty.clone();
+                            func.instruction(&Instruction::I32Const(addr as i32)); // destination
+                            self.expression(func, value)?; // source
+                            func.instruction(&Instruction::I32Const(ty.size() as i32)); // size
+                            func.instruction(&Instruction::MemoryCopy {
+                                src_mem: 0,
+                                dst_mem: 0,
+                            });
                         }
                         _ => todo!(),
                     }

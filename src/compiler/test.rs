@@ -1,4 +1,3 @@
-use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 use ariadne::{Label, Report, ReportKind, Source};
@@ -11,6 +10,7 @@ use crate::error::CompilerError;
 fn run_in_wasmi(source: &str) -> anyhow::Result<String> {
     let wasm = compile(source)?;
     // {
+    //     use std::io::Write;
     //     let wat = wasmprinter::print_bytes(&wasm)?;
     //     println!("\n{wat}\n");
     //
@@ -663,6 +663,35 @@ fn test_record_argument() {
         r#"
             1
             2
+        "#,
+    )
+}
+
+#[test]
+fn test_record_return() {
+    program_test(
+        r#"
+            record Point {
+                x int
+                y int
+            }
+
+            export fn main() {
+                let p Point = make_point()
+                print_int(p.x)
+                print_int(p.y)
+            }
+
+            fn make_point() Point {
+                let p Point
+                p.x = 100
+                p.y = 200
+                return p
+            }
+        "#,
+        r#"
+            100
+            200
         "#,
     )
 }
