@@ -1,10 +1,5 @@
 use std::collections::HashMap;
 
-use wasm_encoder::{
-    BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
-    FunctionSection, ImportSection, Instruction, MemArg, MemorySection, MemoryType, TypeSection,
-    ValType,
-};
 use crate::ast;
 use crate::ast::{
     BinOpKind, Expr, ExprKind, Identifier, ItemKind, LiteralKind, Module, Node, NodeId, Stmt,
@@ -15,6 +10,11 @@ use crate::lexer::Span;
 use crate::parser::parse;
 use crate::resolver::{resolve, Declaration, DeclarationId, DeclarationKind, Resolution};
 use crate::types::Type;
+use wasm_encoder::{
+    BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
+    FunctionSection, ImportSection, Instruction, MemArg, MemorySection, MemoryType, TypeSection,
+    ValType,
+};
 
 #[cfg(test)]
 mod test;
@@ -118,12 +118,14 @@ impl Compiler {
     }
 
     fn lookup_decl(&self, ident: &Identifier) -> CompilerResult<&Declaration> {
-        let decl_id = self.res
-            .uses
-            .get(&ident.node.id)
-            .copied()
-            .ok_or_else(|| error!(ident.node.span, "Unknown declaration of {}", ident.symbol))?;
-        self.res.declarations.get(decl_id as usize).ok_or_else(|| error!(ident.node.span, "Declaration does not exist"))
+        let decl_id =
+            self.res.uses.get(&ident.node.id).copied().ok_or_else(|| {
+                error!(ident.node.span, "Unknown declaration of {}", ident.symbol)
+            })?;
+        self.res
+            .declarations
+            .get(decl_id as usize)
+            .ok_or_else(|| error!(ident.node.span, "Declaration does not exist"))
     }
 
     fn lookup_addr(&self, ident: &Identifier) -> CompilerResult<&Address> {
@@ -141,18 +143,14 @@ impl Compiler {
             .ok_or_else(|| error!(node.span, "Unknown type of node"))
     }
 
-    fn lookup_function_locals(&self, decl_id: DeclarationId) -> impl Iterator<Item=&Declaration> {
-        self
-            .res
-            .declarations
-            .iter()
-            .filter(move |d| {
-                if let DeclarationKind::Local(f) = d.kind {
-                    f == decl_id
-                } else {
-                    false
-                }
-            })
+    fn lookup_function_locals(&self, decl_id: DeclarationId) -> impl Iterator<Item = &Declaration> {
+        self.res.declarations.iter().filter(move |d| {
+            if let DeclarationKind::Local(f) = d.kind {
+                f == decl_id
+            } else {
+                false
+            }
+        })
     }
 
     fn module(&mut self, module: &Module) -> CompilerResult<()> {
@@ -180,12 +178,14 @@ impl Compiler {
             &[signature.return_ty.as_wasm()?]
         };
 
-        let locals = self.lookup_function_locals(func_decl.id)
+        let locals = self
+            .lookup_function_locals(func_decl.id)
             .skip(params.len())
             .map(|d| d.ty.as_wasm().map(|w| (1, w)))
             .collect::<CompilerResult<Vec<(u32, ValType)>>>()?;
 
-        let addr_params = self.lookup_function_locals(func_decl.id)
+        let addr_params = self
+            .lookup_function_locals(func_decl.id)
             .take(params.len())
             .enumerate()
             .filter_map(|(i, d)| {
@@ -216,7 +216,10 @@ impl Compiler {
             wasm_func.instruction(&Instruction::I32Const(dest as i32)); // destination
             wasm_func.instruction(&Instruction::LocalGet(src_var as u32)); // source
             wasm_func.instruction(&Instruction::I32Const(ty.size() as i32)); // size
-            wasm_func.instruction(&Instruction::MemoryCopy { dst_mem: 0, src_mem: 0});
+            wasm_func.instruction(&Instruction::MemoryCopy {
+                dst_mem: 0,
+                src_mem: 0,
+            });
         }
 
         self.statement(&mut wasm_func, &f.body)?;
@@ -595,11 +598,7 @@ impl Compiler {
                     };
                 }
 
-                let Type::Function(signature) = &self.lookup_decl(name)?.ty.clone() else {
-                    unreachable!()
-                };
-
-                for (arg, ty) in args.iter().zip(signature.params.iter()) {
+                for arg in args.iter() {
                     self.expression(func, arg)?;
                 }
 
