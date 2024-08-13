@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 use ariadne::{Label, Report, ReportKind, Source};
@@ -9,7 +10,18 @@ use crate::error::CompilerError;
 
 fn run_in_wasmi(source: &str) -> anyhow::Result<String> {
     let wasm = compile(source)?;
-    // let wat = wasmprinter::print_bytes(&wasm)?; println!("\n{wat}\n");
+    // {
+    //     let wat = wasmprinter::print_bytes(&wasm)?;
+    //     println!("\n{wat}\n");
+    //     
+    //     let mut f = std::fs::OpenOptions::new()
+    //         .create(true)
+    //         .write(true)
+    //         .truncate(true)
+    //         .open("src/compiler/main.wasm")?;
+    //     f.write_all(&wasm)?;
+    //     f.flush()?;
+    // }
     let engine = Engine::default();
     let module = Module::new(&engine, &wasm)?;
 

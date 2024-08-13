@@ -5,7 +5,6 @@ use wasm_encoder::{
     FunctionSection, ImportSection, Instruction, MemArg, MemorySection, MemoryType, TypeSection,
     ValType,
 };
-
 use crate::ast;
 use crate::ast::{
     BinOpKind, Expr, ExprKind, Identifier, ItemKind, LiteralKind, Module, Node, NodeId, Stmt,
@@ -186,6 +185,18 @@ impl Compiler {
             .map(|d| d.ty.as_wasm().map(|w| (1, w)))
             .collect::<CompilerResult<Vec<(u32, ValType)>>>()?;
 
+        let addr_params = self.lookup_function_locals(func_decl.id)
+            .take(params.len())
+            .enumerate()
+            .filter_map(|(i, d)| {
+                if let Some(Address::Mem(adr)) = self.addresses.get(&d.id) {
+                    Some((i, *adr, d.ty.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
         let type_index = self.type_section.len();
         self.type_section.function(params, returns.iter().copied());
         self.function_section.function(type_index);
@@ -200,6 +211,14 @@ impl Compiler {
         }
 
         let mut wasm_func = wasm_encoder::Function::new(locals);
+
+        for (src_var, dest, ty) in addr_params {
+            wasm_func.instruction(&Instruction::I32Const(dest as i32)); // destination
+            wasm_func.instruction(&Instruction::LocalGet(src_var as u32)); // source
+            wasm_func.instruction(&Instruction::I32Const(ty.size() as i32)); // size
+            wasm_func.instruction(&Instruction::MemoryCopy { dst_mem: 0, src_mem: 0});
+        }
+
         self.statement(&mut wasm_func, &f.body)?;
         wasm_func.instruction(&Instruction::End);
         self.code_section.function(&wasm_func);
