@@ -412,6 +412,59 @@ fn test_inner_array_assignment() {
 }
 
 #[test]
+fn test_array_argument() {
+    program_test(
+        r#"
+            export fn main() {
+                let x Array<float, 2>
+                x[0] = 20.0
+                x[1] = 30.0
+                print_array(x)
+                print_float(x[0])
+                print_float(x[1])
+            }
+
+            fn print_array(a Array<float, 2>) {
+                a[0] = a[0] + 0.5
+                a[1] = a[1] + 0.5
+                print_float(a[0])
+                print_float(a[1])
+            }
+        "#,
+        r#"
+            20.5
+            30.5
+            20
+            30
+        "#,
+    )
+}
+
+#[test]
+fn test_array_returned() {
+    program_test(
+        r#"
+            export fn main() {
+                let a Array<float, 2> = make_array() 
+                print_float(a[0])
+                print_float(a[1])
+            }
+
+            fn make_array() Array<float, 2> {
+                let result Array<float, 2>
+                result[0] = 1.5
+                result[1] = 2.5
+                return result
+            }
+        "#,
+        r#"
+            1.5
+            2.5
+        "#,
+    )
+}
+
+#[test]
 fn test_record_assignment() {
     program_test(
         r#"
