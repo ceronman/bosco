@@ -12,8 +12,8 @@ use crate::resolver::{resolve, Declaration, DeclarationId, DeclarationKind, Reso
 use crate::types::Type;
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
-    FunctionSection, ImportSection, Instruction, MemArg, MemorySection, MemoryType, TypeSection,
-    ValType,
+    FunctionSection, GlobalSection, GlobalType, ImportSection, Instruction, MemArg, MemorySection,
+    MemoryType, TypeSection, ValType,
 };
 
 #[cfg(test)]
@@ -76,6 +76,7 @@ struct Compiler {
     type_section: TypeSection,
     function_section: FunctionSection,
     memory_section: MemorySection,
+    global_section: GlobalSection,
     code_section: CodeSection,
     data_section: DataSection,
     data_offset: u32,
@@ -661,6 +662,17 @@ impl Compiler {
         self.export_section.export("memory", ExportKind::Memory, 0);
     }
 
+    fn globals(&mut self) {
+        self.global_section.global(
+            GlobalType {
+                val_type: ValType::I32,
+                mutable: true,
+                shared: false,
+            },
+            &ConstExpr::i32_const(0),
+        );
+    }
+
     fn encode_wasm(&mut self) -> CompilerResult<Vec<u8>> {
         let mut wasm_module = wasm_encoder::Module::new();
         wasm_module.section(&self.type_section);
@@ -677,6 +689,7 @@ impl Compiler {
         self.calculate_addresses();
         self.import_functions()?;
         self.export_memory();
+        self.globals();
         self.module(module)?;
         self.encode_wasm()
     }
@@ -687,17 +700,7 @@ pub fn compile(source: &str) -> CompilerResult<Vec<u8>> {
     let resolution = resolve(&module)?;
     let mut compiler = Compiler {
         res: resolution,
-        addresses: Default::default(),
-        strings: Default::default(),
-        stack_pointer: 0,
-        type_section: Default::default(),
-        function_section: Default::default(),
-        memory_section: Default::default(),
-        code_section: Default::default(),
-        data_section: Default::default(),
-        data_offset: 0,
-        import_section: Default::default(),
-        export_section: Default::default(),
+        ..Default::default()
     };
     compiler.compile(&module)
 }
