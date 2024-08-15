@@ -1163,6 +1163,21 @@ fn test_calling_non_function() {
 }
 
 #[test]
+fn test_calling_function_with_wrong_arguments() {
+    assert_error(
+        r#"
+        export fn main() {
+            foo(2, 3)
+          //^^^^^^^^^ Compiler Error: Function called with incorrect number of arguments
+        }
+        
+        fn foo(x int) {
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_calling_arbitrary_expressions() {
     assert_error(
         r#"
