@@ -319,6 +319,56 @@ fn test_functions() {
     )
 }
 
+// TODO: Fix and better name!
+// #[test]
+// fn test_recursive_stack_function2() {
+//     program_test(
+//         r#"
+//             export fn main() {
+//                 let a Array<int, 5>
+//                 a[4] = 100
+//                 print_int(last(a, 0))
+//             }
+//
+//             fn last(a Array<int, 5>, i int) int {
+//                 if i == 4 {
+//                     return a[4]
+//                 } else {
+//                     return last(a, i + 1)
+//                 }
+//             }
+//         "#,
+//         r#"
+//             100
+//         "#,
+//     )
+// }
+
+#[test]
+fn test_recursive_stack_function() {
+    program_test(
+        r#"
+            export fn main() {
+                let a Array<int, 5>
+                a[4] = 100
+                print_int(last(a, 0))
+            }
+
+            fn last(a Array<int, 5>, i int) int {
+                let result int
+                if i == 4 {
+                    result = a[4]
+                } else {
+                    result = last(a, i + 1)
+                }
+                return result
+            }
+        "#,
+        r#"
+            100
+        "#,
+    )
+}
 #[test]
 fn test_arrays() {
     program_test(
@@ -436,6 +486,25 @@ fn test_array_argument() {
             30.5
             20
             30
+        "#,
+    )
+}
+
+#[test]
+fn test_array_argument_mixed_with_regular() {
+    program_test(
+        r#"
+            export fn main() {
+                let x Array<float, 2>
+                print_array(x, 100)
+            }
+
+            fn print_array(a Array<float, 2>, b int) {
+                print_int(b)
+            }
+        "#,
+        r#"
+            100
         "#,
     )
 }
@@ -1170,7 +1239,7 @@ fn test_calling_function_with_wrong_arguments() {
             foo(2, 3)
           //^^^^^^^^^ Compiler Error: Function called with incorrect number of arguments
         }
-        
+
         fn foo(x int) {
         }
         "#,

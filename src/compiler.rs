@@ -69,7 +69,6 @@ struct Compiler {
     res: Resolution,
 
     addresses: HashMap<DeclarationId, Address>,
-    stack_sizes: HashMap<DeclarationId, u32>,
     strings: HashMap<NodeId, WasmStr>,
 
     // TODO: Extract into an encoder struct
@@ -95,25 +94,20 @@ impl Compiler {
         let mut local_indices = HashMap::new();
         for decl in &self.res.declarations {
             let address = match decl.kind {
-                DeclarationKind::Local(fn_id) => match decl.ty {
-                    Type::Void => Address::None,
-                    Type::Int | Type::Float | Type::Bool => {
-                        let index = local_indices
-                            .entry(fn_id)
-                            .and_modify(|count| *count += 1)
-                            .or_insert(0u32);
-                        Address::Var(*index)
+                DeclarationKind::Local(fn_id) => {
+                    let index = *local_indices
+                        .entry(fn_id)
+                        .and_modify(|count| *count += 1)
+                        .or_insert(0u32);
+
+                    match decl.ty {
+                        Type::Void => Address::None,
+                        Type::Int | Type::Float | Type::Bool => Address::Var(index),
+                        Type::Array { .. } | Type::Record { .. } | Type::Function { .. } => {
+                            Address::Stack(index)
+                        }
                     }
-                    Type::Array { .. } | Type::Record { .. } | Type::Function { .. } => {
-                        let size = decl.ty.size();
-                        let offset = self
-                            .stack_sizes
-                            .entry(fn_id)
-                            .and_modify(|o| *o += size)
-                            .or_insert(size);
-                        Address::Stack(*offset - size)
-                    }
-                },
+                }
                 DeclarationKind::Function => {
                     let a = Address::Fn(fn_index);
                     fn_index += 1;
@@ -188,16 +182,28 @@ impl Compiler {
             &[signature.return_ty.as_wasm()?]
         };
 
-        let mut locals = self
-            .lookup_function_locals(func_id)
-            .skip(params.len())
-            .map(|d| d.ty.as_wasm().map(|w| (1, w)))
-            .collect::<CompilerResult<Vec<(u32, ValType)>>>()?;
+        let mut locals = Vec::new();
+        let mut stack_locals = Vec::new();
+        let mut stack_size = 0;
+        let mut var_count = 0;
+        for (i, decl) in self.lookup_function_locals(func_id).enumerate() {
+            if let Address::Stack(index) = self.addresses.get(&decl.id).unwrap() {
+                stack_locals.push((*index, stack_size, decl.ty.size()));
+                stack_size += decl.ty.size();
+            }
+            if i >= params.len() {
+                locals.push((1, decl.ty.as_wasm()?));
+            }
+            var_count += 1;
+        }
 
         let mut stack_frame_var: u32 = 0;
-        let stack_size = self.stack_sizes.get(&func_id).copied().unwrap_or(0);
+        let mut stack_pointer_var: u32 = 0;
         if stack_size > 0 {
-            stack_frame_var = locals.len() as u32;
+            stack_frame_var = var_count;
+            locals.push((1, ValType::I32));
+            var_count += 1;
+            stack_pointer_var = var_count;
             locals.push((1, ValType::I32))
         }
 
@@ -211,35 +217,61 @@ impl Compiler {
             wasm_func.instruction(&Instruction::LocalTee(stack_frame_var));
             wasm_func.instruction(&Instruction::I32Const(stack_size as i32));
             wasm_func.instruction(&Instruction::I32Sub);
+            wasm_func.instruction(&Instruction::LocalTee(stack_pointer_var));
             wasm_func.instruction(&Instruction::GlobalSet(0));
-        }
 
-        // Find parameters that should be copied from the stack
-        let addr_params = self
-            .lookup_function_locals(func_id)
-            .take(params.len())
-            .enumerate()
-            .filter_map(|(i, d)| {
-                if let Some(Address::Stack(adr)) = self.addresses.get(&d.id) {
-                    Some((i, *adr, d.ty.clone()))
+            for (var, offset, size) in stack_locals {
+                if (var as usize) < params.len() {
+                    wasm_func.instruction(&Instruction::LocalGet(stack_pointer_var));
+                    wasm_func.instruction(&Instruction::I32Const(offset as i32));
+                    wasm_func.instruction(&Instruction::I32Add); // destination
+                    wasm_func.instruction(&Instruction::LocalGet(var)); // source
+                    wasm_func.instruction(&Instruction::I32Const(size as i32)); // size
+                    wasm_func.instruction(&Instruction::MemoryCopy {
+                        src_mem: 0,
+                        dst_mem: 0,
+                    });
+
+                    wasm_func.instruction(&Instruction::LocalGet(stack_pointer_var));
+                    wasm_func.instruction(&Instruction::I32Const(offset as i32));
+                    wasm_func.instruction(&Instruction::I32Add);
+                    wasm_func.instruction(&Instruction::LocalSet(var));
                 } else {
-                    None
+                    wasm_func.instruction(&Instruction::LocalGet(stack_pointer_var));
+                    wasm_func.instruction(&Instruction::I32Const(offset as i32));
+                    wasm_func.instruction(&Instruction::I32Add);
+                    wasm_func.instruction(&Instruction::LocalSet(var));
                 }
-            })
-            .collect::<Vec<_>>();
-
-        // Find copy parameters stored on the stack to the own function stack
-        for (src_var, dest, ty) in addr_params {
-            wasm_func.instruction(&Instruction::GlobalGet(0));
-            wasm_func.instruction(&Instruction::I32Const(dest as i32));
-            wasm_func.instruction(&Instruction::I32Add); // destination
-            wasm_func.instruction(&Instruction::LocalGet(src_var as u32)); // source
-            wasm_func.instruction(&Instruction::I32Const(ty.size() as i32)); // size
-            wasm_func.instruction(&Instruction::MemoryCopy {
-                dst_mem: 0,
-                src_mem: 0,
-            });
+            }
         }
+
+        // // Find parameters that should be copied from the stack
+        // let addr_params = self
+        //     .lookup_function_locals(func_id)
+        //     .take(params.len())
+        //     .enumerate()
+        //     .filter_map(|(i, d)| {
+        //         if let Some(Address::Stack(adr)) = self.addresses.get(&d.id) {
+        //             Some((i, *adr, d.ty.clone()))
+        //         } else {
+        //             None
+        //         }
+        //     })
+        //     .collect::<Vec<_>>();
+        //
+        // // Find copy parameters stored on the stack to the own function stack
+        // for (src_var, dest, ty) in addr_params {
+        //     wasm_func.instruction(&Instruction::GlobalGet(0));
+        //     wasm_func.instruction(&Instruction::I32Const(dest as i32));
+        //     wasm_func.instruction(&Instruction::I32Add); // destination
+        //     wasm_func.instruction(&Instruction::LocalGet(src_var as u32)); // source
+        //     wasm_func.instruction(&Instruction::I32Const(ty.size() as i32)); // size
+        //     wasm_func.instruction(&Instruction::MemoryCopy {
+        //         dst_mem: 0,
+        //         src_mem: 0,
+        //     });
+        // }
+
         self.statement(&mut wasm_func, &f.body)?;
 
         if stack_size > 0 {
@@ -290,11 +322,9 @@ impl Compiler {
                             self.expression(func, value)?;
                             func.instruction(&Instruction::LocalSet(index));
                         }
-                        Address::Stack(offset) => {
+                        Address::Stack(index) => {
+                            func.instruction(&Instruction::LocalGet(index)); // destination
                             let ty = self.lookup_decl(name)?.ty.clone();
-                            func.instruction(&Instruction::GlobalGet(0));
-                            func.instruction(&Instruction::I32Const(offset as i32));
-                            func.instruction(&Instruction::I32Add); // destination
                             self.expression(func, value)?; // source
                             func.instruction(&Instruction::I32Const(ty.size() as i32)); // size
                             func.instruction(&Instruction::MemoryCopy {
@@ -401,10 +431,8 @@ impl Compiler {
         match &target.kind {
             ExprKind::Variable(name) => match *self.lookup_addr(name)? {
                 Address::Var(index) => Ok(MemOp::Local(index)),
-                Address::Stack(offset) => {
-                    func.instruction(&Instruction::GlobalGet(0));
-                    func.instruction(&Instruction::I32Const(offset as i32));
-                    func.instruction(&Instruction::I32Add);
+                Address::Stack(index) => {
+                    func.instruction(&Instruction::LocalGet(index));
                     self.lookup_type(name.node).map(MemOp::Mem)
                 }
                 _ => todo!(),
