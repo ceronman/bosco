@@ -30,7 +30,7 @@ struct WasmStr {
 pub enum Address {
     None,
     Var(u32),
-    Mem(u32),
+    Stack(u32),
     Fn(u32),
 }
 
@@ -69,8 +69,8 @@ struct Compiler {
     res: Resolution,
 
     addresses: HashMap<DeclarationId, Address>,
+    stack_sizes: HashMap<DeclarationId, u32>,
     strings: HashMap<NodeId, WasmStr>,
-    stack_pointer: u32,
 
     // TODO: Extract into an encoder struct
     type_section: TypeSection,
@@ -84,9 +84,12 @@ struct Compiler {
     export_section: ExportSection,
 }
 
-impl Compiler {
-    const MEM: u32 = 0;
+const MEM: u32 = 0;
+const PAGE_SIZE: u32 = 2u32.pow(16);
+const STACK_NUM_PAGES: u32 = 16;
+const STACK_SIZE: u32 = PAGE_SIZE * STACK_NUM_PAGES;
 
+impl Compiler {
     fn calculate_addresses(&mut self) {
         let mut fn_index = 0;
         let mut local_indices = HashMap::new();
@@ -98,13 +101,17 @@ impl Compiler {
                         let index = local_indices
                             .entry(fn_id)
                             .and_modify(|count| *count += 1)
-                            .or_insert(0);
+                            .or_insert(0u32);
                         Address::Var(*index)
                     }
                     Type::Array { .. } | Type::Record { .. } | Type::Function { .. } => {
-                        let pointer = self.stack_pointer;
-                        self.stack_pointer += decl.ty.size();
-                        Address::Mem(pointer)
+                        let size = decl.ty.size();
+                        let offset = self
+                            .stack_sizes
+                            .entry(fn_id)
+                            .and_modify(|o| *o += size)
+                            .or_insert(size);
+                        Address::Stack(*offset - size)
                     }
                 },
                 DeclarationKind::Function => {
@@ -165,6 +172,7 @@ impl Compiler {
 
     fn function(&mut self, f: &ast::Function) -> CompilerResult<()> {
         let func_decl = self.lookup_decl(&f.name)?;
+        let func_id = func_decl.id;
         let Type::Function(signature) = &func_decl.ty else {
             unreachable!()
         };
@@ -173,24 +181,46 @@ impl Compiler {
             .iter()
             .map(|p| p.as_wasm())
             .collect::<CompilerResult<Vec<ValType>>>()?;
+
         let returns: &[ValType] = if *signature.return_ty == Type::Void {
             &[]
         } else {
             &[signature.return_ty.as_wasm()?]
         };
 
-        let locals = self
-            .lookup_function_locals(func_decl.id)
+        let mut locals = self
+            .lookup_function_locals(func_id)
             .skip(params.len())
             .map(|d| d.ty.as_wasm().map(|w| (1, w)))
             .collect::<CompilerResult<Vec<(u32, ValType)>>>()?;
 
+        let mut stack_frame_var: u32 = 0;
+        let stack_size = self.stack_sizes.get(&func_id).copied().unwrap_or(0);
+        if stack_size > 0 {
+            stack_frame_var = locals.len() as u32;
+            locals.push((1, ValType::I32))
+        }
+
+        let mut wasm_func = wasm_encoder::Function::new(locals);
+
+        if stack_size > 0 {
+            // Create space on the stack for the function if needed
+            // stack_frame = stack_pointer
+            // stack_frame -= function size
+            wasm_func.instruction(&Instruction::GlobalGet(0)); // TODO: assign constant or variable to stack pointer
+            wasm_func.instruction(&Instruction::LocalTee(stack_frame_var));
+            wasm_func.instruction(&Instruction::I32Const(stack_size as i32));
+            wasm_func.instruction(&Instruction::I32Sub);
+            wasm_func.instruction(&Instruction::GlobalSet(0));
+        }
+
+        // Find parameters that should be copied from the stack
         let addr_params = self
-            .lookup_function_locals(func_decl.id)
+            .lookup_function_locals(func_id)
             .take(params.len())
             .enumerate()
             .filter_map(|(i, d)| {
-                if let Some(Address::Mem(adr)) = self.addresses.get(&d.id) {
+                if let Some(Address::Stack(adr)) = self.addresses.get(&d.id) {
                     Some((i, *adr, d.ty.clone()))
                 } else {
                     None
@@ -198,9 +228,34 @@ impl Compiler {
             })
             .collect::<Vec<_>>();
 
+        // Find copy parameters stored on the stack to the own function stack
+        for (src_var, dest, ty) in addr_params {
+            wasm_func.instruction(&Instruction::GlobalGet(0));
+            wasm_func.instruction(&Instruction::I32Const(dest as i32));
+            wasm_func.instruction(&Instruction::I32Add); // destination
+            wasm_func.instruction(&Instruction::LocalGet(src_var as u32)); // source
+            wasm_func.instruction(&Instruction::I32Const(ty.size() as i32)); // size
+            wasm_func.instruction(&Instruction::MemoryCopy {
+                dst_mem: 0,
+                src_mem: 0,
+            });
+        }
+        self.statement(&mut wasm_func, &f.body)?;
+
+        if stack_size > 0 {
+            // Restore the stack frame at the end of the function if it's necessary
+            // stack_frame = stack_pointer
+            wasm_func.instruction(&Instruction::LocalGet(stack_frame_var));
+            wasm_func.instruction(&Instruction::GlobalSet(0));
+        }
+
+        wasm_func.instruction(&Instruction::End);
+
         let type_index = self.type_section.len();
-        self.type_section.function(params, returns.iter().copied());
+        self.type_section
+            .function(params.iter().copied(), returns.iter().copied());
         self.function_section.function(type_index);
+        self.code_section.function(&wasm_func);
 
         // Export
         if f.exported {
@@ -210,22 +265,6 @@ impl Compiler {
             self.export_section
                 .export(f.name.symbol.as_str(), ExportKind::Func, *index);
         }
-
-        let mut wasm_func = wasm_encoder::Function::new(locals);
-
-        for (src_var, dest, ty) in addr_params {
-            wasm_func.instruction(&Instruction::I32Const(dest as i32)); // destination
-            wasm_func.instruction(&Instruction::LocalGet(src_var as u32)); // source
-            wasm_func.instruction(&Instruction::I32Const(ty.size() as i32)); // size
-            wasm_func.instruction(&Instruction::MemoryCopy {
-                dst_mem: 0,
-                src_mem: 0,
-            });
-        }
-
-        self.statement(&mut wasm_func, &f.body)?;
-        wasm_func.instruction(&Instruction::End);
-        self.code_section.function(&wasm_func);
 
         Ok(())
     }
@@ -251,9 +290,11 @@ impl Compiler {
                             self.expression(func, value)?;
                             func.instruction(&Instruction::LocalSet(index));
                         }
-                        Address::Mem(addr) => {
+                        Address::Stack(offset) => {
                             let ty = self.lookup_decl(name)?.ty.clone();
-                            func.instruction(&Instruction::I32Const(addr as i32)); // destination
+                            func.instruction(&Instruction::GlobalGet(0));
+                            func.instruction(&Instruction::I32Const(offset as i32));
+                            func.instruction(&Instruction::I32Add); // destination
                             self.expression(func, value)?; // source
                             func.instruction(&Instruction::I32Const(ty.size() as i32)); // size
                             func.instruction(&Instruction::MemoryCopy {
@@ -360,8 +401,10 @@ impl Compiler {
         match &target.kind {
             ExprKind::Variable(name) => match *self.lookup_addr(name)? {
                 Address::Var(index) => Ok(MemOp::Local(index)),
-                Address::Mem(addr) => {
-                    func.instruction(&Instruction::I32Const(addr as i32));
+                Address::Stack(offset) => {
+                    func.instruction(&Instruction::GlobalGet(0));
+                    func.instruction(&Instruction::I32Const(offset as i32));
+                    func.instruction(&Instruction::I32Add);
                     self.lookup_type(name.node).map(MemOp::Mem)
                 }
                 _ => todo!(),
@@ -428,7 +471,7 @@ impl Compiler {
             }
             ExprKind::Literal(LiteralKind::String(symbol)) => {
                 let wasm_str = WasmStr {
-                    memory: Compiler::MEM,
+                    memory: MEM,
                     offset: self.data_offset,
                     len: symbol.as_str().len() as u32,
                 };
@@ -652,7 +695,7 @@ impl Compiler {
 
     fn export_memory(&mut self) {
         let memory = MemoryType {
-            minimum: 16, // TODO: temporary size
+            minimum: STACK_NUM_PAGES as u64,
             maximum: None,
             memory64: false,
             shared: false,
@@ -669,7 +712,7 @@ impl Compiler {
                 mutable: true,
                 shared: false,
             },
-            &ConstExpr::i32_const(0),
+            &ConstExpr::i32_const(STACK_SIZE as i32 - 1),
         );
     }
 
@@ -679,6 +722,7 @@ impl Compiler {
         wasm_module.section(&self.import_section);
         wasm_module.section(&self.function_section);
         wasm_module.section(&self.memory_section);
+        wasm_module.section(&self.global_section);
         wasm_module.section(&self.export_section);
         wasm_module.section(&self.code_section);
         wasm_module.section(&self.data_section);
