@@ -417,7 +417,8 @@ impl Compiler {
             }
 
             StmtKind::Return { expr } => {
-                self.expression(func, expr)?; // TODO: Check no more statements after last return
+                self.expression(func, expr)?;
+                func.instruction(&Instruction::Return);
             }
         }
         Ok(())

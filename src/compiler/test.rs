@@ -13,7 +13,7 @@ fn run_in_wasmi(source: &str) -> anyhow::Result<String> {
     //     use std::io::Write;
     //     let wat = wasmprinter::print_bytes(&wasm)?;
     //     println!("\n{wat}\n");
-    //
+    // 
     //     let mut f = std::fs::OpenOptions::new()
     //         .create(true)
     //         .write(true)
@@ -319,30 +319,29 @@ fn test_functions() {
     )
 }
 
-// TODO: Fix and better name!
-// #[test]
-// fn test_recursive_stack_function2() {
-//     program_test(
-//         r#"
-//             export fn main() {
-//                 let a Array<int, 5>
-//                 a[4] = 100
-//                 print_int(last(a, 0))
-//             }
-//
-//             fn last(a Array<int, 5>, i int) int {
-//                 if i == 4 {
-//                     return a[4]
-//                 } else {
-//                     return last(a, i + 1)
-//                 }
-//             }
-//         "#,
-//         r#"
-//             100
-//         "#,
-//     )
-// }
+// TODO: Fix with proper data-flow analysis.
+#[test]
+fn test_function_with_conditional_return() {
+    program_test(
+        r#"
+            export fn main() {
+                print_int(cond(true))
+            }
+
+            fn cond(c bool) int {
+                if c {
+                    return 1
+                } else {
+                    return 2
+                }
+                1 // Should not be necessary!
+            }
+        "#,
+        r#"
+            1
+        "#,
+    )
+}
 
 #[test]
 fn test_recursive_stack_function() {

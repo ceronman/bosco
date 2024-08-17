@@ -1,0 +1,7 @@
+- Array initializers
+- Record initializers
+- Proper `return` support maybe data flow analysis?
+- while: break and continue support
+- syntax: short block syntax
+- testing: Add tests for missing code coverage
+- pointers
