@@ -13,7 +13,7 @@ fn run_in_wasmi(source: &str) -> anyhow::Result<String> {
     //     use std::io::Write;
     //     let wat = wasmprinter::print_bytes(&wasm)?;
     //     println!("\n{wat}\n");
-    // 
+    //
     //     let mut f = std::fs::OpenOptions::new()
     //         .create(true)
     //         .write(true)

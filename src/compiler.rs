@@ -245,33 +245,6 @@ impl Compiler {
             }
         }
 
-        // // Find parameters that should be copied from the stack
-        // let addr_params = self
-        //     .lookup_function_locals(func_id)
-        //     .take(params.len())
-        //     .enumerate()
-        //     .filter_map(|(i, d)| {
-        //         if let Some(Address::Stack(adr)) = self.addresses.get(&d.id) {
-        //             Some((i, *adr, d.ty.clone()))
-        //         } else {
-        //             None
-        //         }
-        //     })
-        //     .collect::<Vec<_>>();
-        //
-        // // Find copy parameters stored on the stack to the own function stack
-        // for (src_var, dest, ty) in addr_params {
-        //     wasm_func.instruction(&Instruction::GlobalGet(0));
-        //     wasm_func.instruction(&Instruction::I32Const(dest as i32));
-        //     wasm_func.instruction(&Instruction::I32Add); // destination
-        //     wasm_func.instruction(&Instruction::LocalGet(src_var as u32)); // source
-        //     wasm_func.instruction(&Instruction::I32Const(ty.size() as i32)); // size
-        //     wasm_func.instruction(&Instruction::MemoryCopy {
-        //         dst_mem: 0,
-        //         src_mem: 0,
-        //     });
-        // }
-
         self.statement(&mut wasm_func, &f.body)?;
 
         if stack_size > 0 {
