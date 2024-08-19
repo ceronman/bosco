@@ -71,10 +71,16 @@ impl SExpr for Identifier {
 
 impl SExpr for Type {
     fn s_expr(&self) -> String {
-        if self.params.is_empty() {
+        let inner = if self.params.is_empty() {
             self.name.s_expr()
         } else {
             format!("{}<{}>", self.name.s_expr(), self.params.s_expr())
+        };
+        
+        if self.pointer {
+            format!("(* {inner})")
+        } else {
+            inner
         }
     }
 }
@@ -211,7 +217,7 @@ impl SExpr for LiteralKind {
     }
 }
 
-impl<T: SExpr> SExpr for Rc<[T]> {
+impl<T: SExpr> SExpr for Rc<[T]> { 
     fn s_expr(&self) -> String {
         format!(
             "{}",
@@ -612,5 +618,20 @@ fn test_field_access() {
         (= (get x y) 1)
         (= (index (get x y) 1) 1)
         (* (get x y) (get a b))
+    }
+}
+
+#[test]
+fn test_pointer() {
+    test_parser! {
+        r#"
+            record Point {
+                x *int
+                y int
+            }
+        "#,
+        (module
+            (record Point (field x (* int)) (field y int))
+        )
     }
 }

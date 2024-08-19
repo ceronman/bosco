@@ -122,6 +122,8 @@ impl<'src> Parser<'src> {
     }
 
     fn ty(&mut self) -> CompilerResult<Type> {
+        let start = self.token;
+        let pointer = self.eat(TokenKind::Star);
         let name = self.identifier(|t| format!("Expected type, found {:?} instead", t.kind))?;
         let mut end = name.node.span;
         let mut params = Vec::new();
@@ -139,7 +141,8 @@ impl<'src> Parser<'src> {
         }
 
         Ok(Type {
-            node: self.node(name.node.span, end),
+            node: self.node(start.span, end),
+            pointer,
             name,
             params: params.into(),
         })

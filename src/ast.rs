@@ -195,6 +195,7 @@ pub struct Identifier {
 
 #[derive(Debug, Clone)]
 pub struct Type {
+    pub pointer: bool,
     pub node: Node,
     pub name: Identifier,
     pub params: Rc<[TypeParam]>,
